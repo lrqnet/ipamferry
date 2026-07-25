@@ -1,0 +1,16 @@
+services:
+  init:
+    build:
+      context: .
+  database-init:
+    build:
+      context: .
+  app:
+    build:
+      context: .
+  worker:
+    build:
+      context: .
+  scheduler:
+    build:
+      context: .

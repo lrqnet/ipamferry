@@ -1,0 +1,13 @@
+/vendor
+/node_modules
+/public/build
+/.env
+/AGENTS.md
+/.phpunit.result.cache
+/playwright-report
+/test-results
+/storage/*.key
+/storage/app/private/*
+!/storage/app/private/.gitignore
+/bootstrap/cache/*
+!/bootstrap/cache/.gitignore

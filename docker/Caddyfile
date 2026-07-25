@@ -1,0 +1,16 @@
+{
+    admin off
+    frankenphp
+    auto_https disable_redirects
+}
+
+http://:8080 {
+    root * /app/public
+    php_server
+}
+
+https://localhost:8443 {
+    tls internal
+    root * /app/public
+    php_server
+}

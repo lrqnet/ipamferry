@@ -1,0 +1,11 @@
+.git
+.github
+.env
+node_modules
+vendor
+public/build
+playwright-report
+test-results
+storage/app/private
+bootstrap/cache/*
+!bootstrap/cache/.gitignore

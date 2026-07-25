@@ -1,0 +1,100 @@
+name: release
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with: {fetch-depth: 0, persist-credentials: false}
+      - name: Validate immutable release inputs
+        run: |
+          MAIN_SHA="$(git ls-remote origin refs/heads/main | cut -f1)"
+          TAG_SHA="$(git ls-remote --tags origin "refs/tags/${GITHUB_REF_NAME}^{}" | cut -f1)"
+          test -n "$TAG_SHA"
+          sh scripts/release-preflight.sh "$GITHUB_REF_NAME" "$TAG_SHA" "$MAIN_SHA"
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
+        with: {registry: docker.io, username: '${{ secrets.DOCKERHUB_USERNAME }}', password: '${{ secrets.DOCKERHUB_TOKEN }}'}
+      - name: Reject an already-published version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if docker buildx imagetools inspect "docker.io/lrqnet/ipamferry:${version}" >/dev/null 2>&1; then
+            echo "Image tag is immutable and already exists: ${version}"; exit 1
+          fi
+  image:
+    needs: preflight
+    runs-on: ubuntu-latest
+    outputs: {digest: '${{ steps.build.outputs.digest }}'}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with: {persist-credentials: false}
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
+        with: {registry: ghcr.io, username: '${{ github.actor }}', password: '${{ secrets.GITHUB_TOKEN }}'}
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
+        with: {registry: docker.io, username: '${{ secrets.DOCKERHUB_USERNAME }}', password: '${{ secrets.DOCKERHUB_TOKEN }}'}
+      - id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051
+        with:
+          images: |
+            ghcr.io/lrqnet/ipamferry
+            docker.io/lrqnet/ipamferry
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
+      - id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
+        with:
+          context: .
+          target: production
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: IPAMFERRY_VERSION=${{ github.ref_name }}
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha,scope=ipamferry
+          cache-to: type=gha,mode=max,scope=ipamferry
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
+        with: {cosign-release: v3.0.6}
+      - run: |
+          cosign sign --yes "ghcr.io/lrqnet/ipamferry@${{ steps.build.outputs.digest }}"
+          cosign sign --yes "docker.io/lrqnet/ipamferry@${{ steps.build.outputs.digest }}"
+  github-release:
+    needs: image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with: {persist-credentials: false}
+      - name: Create digest-pinned Compose artifact
+        env: {DIGEST: '${{ needs.image.outputs.digest }}'}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          mkdir -p dist
+          sed "s#docker.io/lrqnet/ipamferry:${VERSION}#docker.io/lrqnet/ipamferry@${DIGEST}#g" compose.yaml > dist/compose.yaml
+          grep -q "docker.io/lrqnet/ipamferry@sha256:" dist/compose.yaml
+          docker compose -f dist/compose.yaml config --quiet
+          sha256sum dist/compose.yaml > dist/compose.sha256
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65
+        with:
+          generate_release_notes: true
+          files: |
+            dist/compose.yaml
+            dist/compose.sha256

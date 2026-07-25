@@ -1,0 +1,57 @@
+name: checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with: {persist-credentials: false}
+      - uses: shivammathur/setup-php@b604ade2a87db23f8871b7182e69ec5e75effb45
+        with: {php-version: '8.4', tools: 'composer:v2'}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with: {node-version: '22', cache: npm}
+      - run: composer install --no-interaction --no-progress --prefer-dist
+      - run: npm ci --ignore-scripts
+      - run: cp .env.example .env
+      - run: touch database/database.sqlite && php artisan key:generate
+      - run: npm run build
+      - run: vendor/bin/pint --test
+      - run: vendor/bin/phpstan analyse --no-progress --memory-limit=1G
+      - run: php artisan test
+      - run: npm run lint:check
+      - run: npm run types:check
+  compose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with: {persist-credentials: false}
+      - run: docker compose -f compose.yaml --profile sandbox config --quiet
+      - run: docker build -t ipamferry:ci .
+      - run: test "$(docker image inspect ipamferry:ci --format '{{json .Config.Cmd}}')" = '["frankenphp","run","--config","/etc/frankenphp/Caddyfile"]'
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with: {persist-credentials: false}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with: {node-version: '22', cache: npm}
+      - run: npm ci --ignore-scripts
+      - run: npx playwright install --with-deps chromium
+      - run: ./scripts/e2e-test.sh chromium
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: playwright-chromium
+          path: |
+            playwright-report
+            test-results
+          if-no-files-found: warn

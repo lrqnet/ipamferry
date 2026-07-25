@@ -1,0 +1,194 @@
+name: ipamferry
+
+x-ipamferry-image: &ipamferry-image
+  image: ${IPAMFERRY_IMAGE:-docker.io/lrqnet/ipamferry:0.1.0}
+
+x-ipamferry-environment: &ipamferry-environment
+  APP_ENV: production
+  APP_DEBUG: 'false'
+  IPAMFERRY_SANDBOX_URL: http://sandbox-netbox:8080
+  DB_CONNECTION: pgsql
+  DB_HOST: postgres
+  DB_PORT: '5432'
+  DB_DATABASE: ipamferry
+  DB_USERNAME: ipamferry
+
+services:
+  init:
+    <<: *ipamferry-image
+    command: ["init-secrets.sh"]
+    user: "0:0"
+    restart: "no"
+    read_only: true
+    network_mode: none
+    security_opt: ["no-new-privileges:true"]
+    volumes:
+      - ipamferry_secrets:/run/ipamferry-secrets
+      - ipamferry_recovery_secrets:/run/ipamferry-recovery-secrets
+      - ipamferry_storage:/var/lib/ipamferry/storage
+      - ipamferry_cache:/var/lib/ipamferry/cache
+      - caddy_data:/var/lib/ipamferry/caddy-data
+      - caddy_config:/var/lib/ipamferry/caddy-config
+      - sandbox_postgres_data:/var/lib/ipamferry/sandbox-postgres
+  postgres:
+    image: postgres:18-bookworm
+    restart: unless-stopped
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    depends_on: {init: {condition: service_completed_successfully}}
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: ipamferry_admin
+      POSTGRES_PASSWORD_FILE: /run/ipamferry-recovery-secrets/postgres_admin_password
+      PGDATA: /var/lib/postgresql/data
+    volumes: ["postgres_data:/var/lib/postgresql", "ipamferry_recovery_secrets:/run/ipamferry-recovery-secrets:ro"]
+    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=64m", "/var/run/postgresql:rw,nosuid,nodev,size=16m"]
+    healthcheck: {test: ["CMD-SHELL", "pg_isready -U ipamferry_admin -d postgres"], interval: 5s, timeout: 5s, retries: 30}
+    networks: [internal]
+  database-init:
+    <<: *ipamferry-image
+    command: ["/usr/local/bin/database-initialize.sh"]
+    restart: "no"
+    read_only: true
+    user: "0:0"
+    security_opt: ["no-new-privileges:true"]
+    depends_on: {postgres: {condition: service_healthy}}
+    environment: *ipamferry-environment
+    volumes: ["ipamferry_secrets:/run/ipamferry-secrets:ro", "ipamferry_recovery_secrets:/run/ipamferry-recovery-secrets:ro", "ipamferry_cache:/app/bootstrap/cache"]
+    networks: [internal]
+  app:
+    <<: *ipamferry-image
+    restart: unless-stopped
+    read_only: true
+    user: "20000:20000"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    depends_on: {database-init: {condition: service_completed_successfully}}
+    environment: *ipamferry-environment
+    volumes: ["ipamferry_secrets:/run/ipamferry-secrets:ro", "ipamferry_storage:/app/storage", "ipamferry_cache:/app/bootstrap/cache", "caddy_data:/data", "caddy_config:/config"]
+    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=64m,uid=20000,gid=20000,mode=1700"]
+    ports:
+      - target: 8080
+        published: "${IPAMFERRY_HTTP_PORT:-80}"
+        host_ip: "${IPAMFERRY_BIND_IP:-0.0.0.0}"
+      - target: 8443
+        published: "${IPAMFERRY_HTTPS_PORT:-443}"
+        host_ip: "${IPAMFERRY_BIND_IP:-0.0.0.0}"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8080/up"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    networks: [edge, internal, egress, sandbox_internal]
+  worker:
+    <<: *ipamferry-image
+    command: ["/usr/local/bin/worker.sh"]
+    restart: unless-stopped
+    read_only: true
+    user: "20000:20000"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      disable: true
+    depends_on: {database-init: {condition: service_completed_successfully}}
+    environment: *ipamferry-environment
+    volumes: ["ipamferry_secrets:/run/ipamferry-secrets:ro", "ipamferry_storage:/app/storage", "ipamferry_cache:/app/bootstrap/cache"]
+    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=64m,uid=20000,gid=20000,mode=1700"]
+    networks: [internal, egress]
+  scheduler:
+    <<: *ipamferry-image
+    command: ["/usr/local/bin/scheduler.sh"]
+    restart: unless-stopped
+    read_only: true
+    user: "20000:20000"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      disable: true
+    depends_on: {database-init: {condition: service_completed_successfully}}
+    environment: *ipamferry-environment
+    volumes: ["ipamferry_secrets:/run/ipamferry-secrets:ro", "ipamferry_storage:/app/storage", "ipamferry_cache:/app/bootstrap/cache"]
+    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=64m,uid=20000,gid=20000,mode=1700"]
+    networks: [internal]
+  sandbox-netbox:
+    profiles: ["sandbox"]
+    image: netboxcommunity/netbox:v4.6.1-5.0.1
+    restart: unless-stopped
+    user: "netbox:root"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    command:
+      - /opt/netbox/docker-entrypoint.sh
+      - /bin/bash
+      - -ec
+      - |
+        ./manage.py shell --no-startup --no-imports --interface python -c "from users.choices import TokenVersionChoices; from users.models import Token, User; key=open('/run/secrets/superuser_api_key', encoding='utf-8').read().strip(); token=open('/run/secrets/superuser_api_token', encoding='utf-8').read().strip(); user=User.objects.get(username='ipamferry'); Token.objects.filter(key=key).delete(); Token.objects.create(user=user, token=token, version=TokenVersionChoices.V2, key=key)"
+        exec /opt/netbox/launch-netbox.sh
+    environment:
+      ALLOWED_HOSTS: "*"
+      API_TOKEN_PEPPER_1: ""
+      CENSUS_REPORTING_ENABLED: "false"
+      COPILOT_ENABLED: "false"
+      DB_HOST: sandbox-postgres
+      DB_NAME: netbox
+      DB_USER: netbox
+      ISOLATED_DEPLOYMENT: "true"
+      REDIS_HOST: sandbox-redis
+      REDIS_CACHE_HOST: sandbox-redis
+      REDIS_DATABASE: "0"
+      REDIS_CACHE_DATABASE: "1"
+      SKIP_SUPERUSER: "false"
+      SUPERUSER_NAME: ipamferry
+      SUPERUSER_EMAIL: sandbox@example.invalid
+    volumes: ["ipamferry_secrets:/run/secrets:ro"]
+    depends_on: {sandbox-postgres: {condition: service_healthy}, sandbox-redis: {condition: service_healthy}}
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8080/login/"]
+      interval: 15s
+      timeout: 20s
+      retries: 40
+      start_period: 15m
+    networks: [sandbox_internal]
+  sandbox-postgres:
+    profiles: ["sandbox"]
+    image: postgres:18-bookworm
+    restart: unless-stopped
+    read_only: true
+    user: "999:999"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    depends_on: {init: {condition: service_completed_successfully}}
+    environment:
+      POSTGRES_DB: netbox
+      POSTGRES_USER: netbox
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+      PGDATA: /var/lib/postgresql/data
+    volumes: ["ipamferry_secrets:/run/secrets:ro", "sandbox_postgres_data:/var/lib/postgresql"]
+    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777", "/var/run/postgresql:rw,nosuid,nodev,size=16m,uid=999,gid=999,mode=0775"]
+    healthcheck: {test: ["CMD-SHELL", "pg_isready -U netbox -d netbox"], interval: 5s, timeout: 5s, retries: 20}
+    networks: [sandbox_internal]
+  sandbox-redis:
+    profiles: ["sandbox"]
+    image: redis:7-alpine
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    depends_on: {init: {condition: service_completed_successfully}}
+    command: ["/bin/sh", "-c", "exec redis-server --save '' --requirepass \"$$(cat /run/secrets/redis_password)\""]
+    volumes: ["ipamferry_secrets:/run/secrets:ro"]
+    tmpfs: ["/data:rw,noexec,nosuid,nodev,size=64m"]
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning -a \"$$(cat /run/secrets/redis_password)\" ping | grep -q PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [sandbox_internal]
+
+volumes: {postgres_data: {}, sandbox_postgres_data: {}, ipamferry_secrets: {}, ipamferry_recovery_secrets: {}, ipamferry_storage: {}, ipamferry_cache: {}, caddy_data: {}, caddy_config: {}}
+networks:
+  edge: {}
+  internal: {internal: true}
+  egress: {}
+  sandbox_internal: {internal: true}
