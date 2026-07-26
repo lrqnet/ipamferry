@@ -1,44 +1,37 @@
-# Release, GitHub Actions e Docker Hub
+# Operations and release
 
-## Pré-requisitos externos
+> **Language:** [English](RELEASE.md) · [Português (Brasil)](pt-BR/RELEASE.md) · [Español](es/RELEASE.md)
 
-Antes da primeira publicação, crie os repositórios públicos `lrqnet/ipamferry`
-no Docker Hub e no GitHub. No repositório GitHub, em **Settings → Actions →
-General**, permita que `GITHUB_TOKEN` crie e publique pacotes.
+## Install and upgrade
 
-Crie estes secrets em **Settings → Secrets and variables → Actions**:
-
-- `DOCKERHUB_USERNAME`: usuário ou conta de automação Docker Hub;
-- `DOCKERHUB_TOKEN`: personal access token Docker Hub com permissão de escrita.
-
-O token não entra em `.env`, Compose, imagem, log ou documentação pública.
-
-## Checks contínuos
-
-- `checks`: Composer, Pint, PHPStan, PHPUnit, build/lint/types do frontend,
-  build Docker e jornada E2E Chromium em cada PR e push para `main`.
-- `e2e-nightly`: Chromium, Firefox e WebKit diariamente e sob demanda.
-- `security`: auditoria Composer/npm, Trivy de filesystem, configuração e
-  segredos em PR, push e execução semanal.
-
-Defina `checks / quality`, `checks / compose` e `checks / e2e` como required
-status checks na branch `main` após o primeiro push bem-sucedido.
-
-## Publicação
-
-As imagens são publicadas em `docker.io/lrqnet/ipamferry` e
-`ghcr.io/lrqnet/ipamferry`, para `linux/amd64` e `linux/arm64`. O workflow
-`release` é acionado exclusivamente por tag anotada SemVer que aponta para a
-`main` remota e corresponde ao `CHANGELOG.md` e à versão do Compose.
+Install the release `compose.yaml` with `docker compose up -d --wait`. For a source checkout use the development overlay:
 
 ```bash
-git checkout main
-git pull --ff-only
-git tag -a v0.1.0 -m 'IpamFerry v0.1.0'
-git push origin refs/tags/v0.1.0
+docker compose --file compose.yaml --file compose.dev.yaml up -d --build --wait
 ```
 
-Ele constrói e publica imagens multiarch, produz SBOM/provenance, assina os
-digests com Cosign keyless e anexa à GitHub Release um `compose.yaml` fixado no
-digest. Tags versionadas são imutáveis: uma publicação parcial deve ser
-corrigida com uma nova versão patch, nunca movendo a tag.
+Confirm service health with `docker compose ps`. `app` is the only service exposed to the LAN. Do not expose PostgreSQL, sandbox NetBox, or internal service networks.
+
+## Password recovery
+
+Recovery requires Docker host administrator access and an interactive terminal:
+
+```bash
+docker compose exec -it app php artisan ipamferry:reset-password
+```
+
+When there is exactly one active owner, no email argument is needed. With no or multiple active owners, provide the exact account email:
+
+```bash
+docker compose exec -it app php artisan ipamferry:reset-password owner@example.test
+```
+
+The command never reads a password argument, environment variable, or stdin. It prompts for a hidden password and confirmation, enforces the project password policy, rotates the remember token, removes active database sessions and pending password-reset tokens, and records a minimal `cli` security event. It refuses inactive accounts. There is no web or email recovery path.
+
+## Sandbox rehearsal
+
+```bash
+docker compose --profile sandbox up -d --wait
+```
+
+Generate a fresh plan for sandbox and another fresh sibling plan for production. Never apply a sandbox plan to a production target.

@@ -9,6 +9,7 @@
     "format:check": "prettier --check resources/ '*.{json,md,yaml,yml}'",
     "types:check": "tsc --noEmit",
     "translations:check": "tsx scripts/check-translations.ts",
+    "docs:check": "tsx scripts/check-public-docs.ts",
     "test:e2e:chromium": "./scripts/e2e-test.sh chromium",
     "test:e2e:all": "./scripts/e2e-test.sh all"
   },
