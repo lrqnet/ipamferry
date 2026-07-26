@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Domain\Migration\BundleBuilder;
 use App\Domain\Migration\CanonicalJson;
 use App\Domain\Migration\EndpointPolicy;
+use App\Domain\Migration\MappingCatalog;
 use App\Domain\Migration\MappingPolicy;
 use App\Domain\Migration\MigrationApplier;
 use App\Domain\Migration\MigrationAudit;
@@ -55,7 +56,7 @@ class MigrationProjectController extends Controller
             'locale' => $data['locale'] ?? app()->getLocale(),
             'created_by' => $request->user()->id,
             'status' => MigrationProjectStatus::Draft,
-            'mapping' => MappingPolicy::defaults(),
+            'mapping' => MappingPolicy::v2Defaults(),
         ]);
         $audit->record($project, 'project.created', [
             'source_kind' => $project->source_kind,
@@ -128,6 +129,7 @@ class MigrationProjectController extends Controller
         Request $request,
         MigrationProject $project,
         SourceNormalizer $normalizer,
+        MappingCatalog $catalog,
         MigrationAudit $audit,
         MigrationOperationLock $operations,
         SandboxConnection $sandbox,
@@ -166,7 +168,7 @@ class MigrationProjectController extends Controller
                 $data['phpipam_token'],
             ))->inventory();
             $targetInventory = (new NetBoxClient($targetConnection['url'], $targetConnection['token']))->inventory();
-            $this->storeDiscovery($project, $normalizer->normalize($sourceInventory), $targetInventory);
+            $this->storeDiscovery($project, $normalizer->normalize($sourceInventory), $targetInventory, $catalog);
             $audit->record(
                 $project,
                 'discovery.completed',
@@ -187,6 +189,7 @@ class MigrationProjectController extends Controller
         MigrationProject $project,
         SqlDumpParser $parser,
         SourceNormalizer $normalizer,
+        MappingCatalog $catalog,
         MigrationAudit $audit,
         MigrationOperationLock $operations,
         SandboxConnection $sandbox,
@@ -227,7 +230,7 @@ class MigrationProjectController extends Controller
             }
             $parsed = $parser->parseFile(Storage::disk('local')->path($stored));
             $sourceInventory = [
-                'schema_version' => 1,
+                'schema_version' => 2,
                 'instance' => [
                     'kind' => 'phpipam_dump',
                     'filename_hash' => hash_file('sha256', Storage::disk('local')->path($stored)),
@@ -238,7 +241,7 @@ class MigrationProjectController extends Controller
                 'warnings' => $parsed['_warnings'] ?? [],
             ];
             $targetInventory = (new NetBoxClient($targetConnection['url'], $targetConnection['token']))->inventory();
-            $this->storeDiscovery($project, $normalizer->normalize($sourceInventory), $targetInventory);
+            $this->storeDiscovery($project, $normalizer->normalize($sourceInventory), $targetInventory, $catalog);
             $audit->record(
                 $project,
                 'discovery.completed',
@@ -311,6 +314,11 @@ class MigrationProjectController extends Controller
         MigrationOperationLock $operations,
     ): RedirectResponse {
         abort_if($project->source_snapshot === null || $project->target_snapshot === null, 422, 'Run discovery before planning.');
+        abort_if(
+            $project->status === MigrationProjectStatus::Verified,
+            422,
+            'Refresh the NetBox target before generating a sibling plan.',
+        );
         try {
             $lock = $operations->acquire($project);
             $operations->assertDefinitionMutable($project);
@@ -461,6 +469,7 @@ class MigrationProjectController extends Controller
         MigrationAudit $audit,
         MigrationOperationLock $operations,
         SandboxConnection $sandbox,
+        MappingCatalog $catalog,
     ): RedirectResponse {
         abort_if($project->source_snapshot === null, 422, 'Run source discovery before changing the target.');
         $rules = ['use_sandbox' => ['sometimes', 'boolean']];
@@ -479,6 +488,7 @@ class MigrationProjectController extends Controller
             $manifest = $project->discovery_manifest ?? [];
             $project->update([
                 'target_snapshot' => $target,
+                'mapping_catalog' => $catalog->build($project->source_snapshot ?? [], $target),
                 'target_instance' => $targetInstance,
                 'discovery_manifest' => [
                     ...$manifest,
@@ -509,24 +519,28 @@ class MigrationProjectController extends Controller
         }
     }
 
-    private function storeDiscovery(MigrationProject $project, array $source, array $target): void
+    private function storeDiscovery(MigrationProject $project, array $source, array $target, MappingCatalog $catalog): void
     {
         $sourceInstance = $source['instance'] ?? [];
         $targetInstance = $target['instance'] ?? [];
         $project->update([
             'source_snapshot' => $source,
             'target_snapshot' => $target,
+            'mapping_catalog' => $catalog->build($source, $target),
             'source_instance' => $sourceInstance,
             'target_instance' => $targetInstance,
             'discovery_manifest' => [
-                'schema_version' => 1,
+                'schema_version' => 2,
                 'source_fingerprint' => SnapshotFingerprint::make($source),
                 'target_fingerprint' => SnapshotFingerprint::make($target),
                 'source_counts' => $this->counts($source['objects'] ?? []),
                 'target_counts' => $this->counts($target['objects'] ?? []),
                 'discovered_at' => now()->toIso8601String(),
             ],
-            'snapshot_schema_version' => 1,
+            'snapshot_schema_version' => max(
+                (int) ($source['schema_version'] ?? 1),
+                (int) ($target['schema_version'] ?? 1),
+            ),
             'status' => MigrationProjectStatus::Discovered,
             'last_error' => null,
         ]);

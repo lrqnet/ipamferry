@@ -38,7 +38,7 @@ class SandboxConnectionTest extends TestCase
 
     public function test_it_builds_a_netbox_v2_token_only_from_valid_secret_files(): void
     {
-        file_put_contents("{$this->directory}/key", "AbCdEf123456\n");
+        file_put_contents("{$this->directory}/key", str_repeat('k', 12)."\n");
         file_put_contents("{$this->directory}/token", str_repeat('x', 40)."\n");
         Http::fake(['http://sandbox-netbox:8080/api/status/' => Http::response(['netbox-version' => '4.6.1'])]);
 
@@ -47,17 +47,17 @@ class SandboxConnectionTest extends TestCase
         self::assertTrue($connection->available());
         self::assertSame([
             'url' => 'http://sandbox-netbox:8080',
-            'token' => 'nbt_AbCdEf123456.'.str_repeat('x', 40),
+            'token' => 'nbt_'.str_repeat('k', 12).'.'.str_repeat('x', 40),
         ], $connection->credentials());
         Http::assertSent(fn (Request $request): bool => $request->hasHeader(
             'Authorization',
-            'Bearer nbt_AbCdEf123456.'.str_repeat('x', 40),
+            'Bearer nbt_'.str_repeat('k', 12).'.'.str_repeat('x', 40),
         ));
     }
 
     public function test_unreachable_sandbox_is_not_advertised(): void
     {
-        file_put_contents("{$this->directory}/key", 'AbCdEf123456');
+        file_put_contents("{$this->directory}/key", str_repeat('k', 12));
         file_put_contents("{$this->directory}/token", str_repeat('x', 40));
         Http::fake(['*' => Http::response([], 503)]);
 

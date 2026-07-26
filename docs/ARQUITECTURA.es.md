@@ -16,27 +16,31 @@ El descubrimiento lee la API oficial de phpIPAM o analiza un `mysqldump`
 la API REST, recorre la paginación y consulta `OPTIONS` para validar campos
 obligatorios, opciones y límites de la versión detectada.
 
-El alcance automático actual incluye VRFs, VLAN Groups, VLANs, Prefixes, IP
-Addresses y custom fields aprobados explícitamente. Sections, devices, racks,
-NAT, DNS, permisos y extensiones sin equivalente seguro permanecen en el
-informe de preservación.
+El alcance automático incluye equivalencias seguras de IPAM, Tenancy, DCIM,
+Circuits y ASN. PAT, sesiones BGP, DNS autoritativo, permisos y extensiones sin
+equivalente seguro permanecen en el informe de preservación.
 
-La política de mapeo es JSON versionado y no puede ejecutar código. Los objetos
-existentes en NetBox se reutilizan por defecto. Las actualizaciones requieren
-autorización por tipo y campo. Coincidencias ambiguas, dependencias ausentes,
-reclamos duplicados, colisiones de unicidad y schemas incompatibles bloquean el
-plan.
+Mapping Studio edita JSON versionado sin código ejecutable. Las sugerencias
+deterministas requieren aceptación, las revisiones optimistas evitan
+sobrescrituras y el preview temporal usa el mismo planificador. Los objetos
+existentes se reutilizan por defecto y los updates son opt-in.
 
 ## Identidad y seguridad de ejecución
 
-| Objeto NetBox | Identidad principal | Restricción adicional |
-| --- | --- | --- |
-| VRF | RD; nombre inequívoco sin RD | RD único |
-| VLAN Group | ámbito + nombre | ámbito + slug |
-| VLAN | grupo + VID | grupo + nombre |
-| Prefix | VRF + prefijo canónico | dependencias de VRF/VLAN |
-| IP Address | VRF + dirección con máscara | dependencias de VRF/prefijo |
-| Custom Field | nombre | tipo y object types compatibles |
+| Objeto NetBox                 | Identidad principal                       | Restricción adicional                 |
+| ----------------------------- | ----------------------------------------- | ------------------------------------- |
+| VRF                           | RD; nombre inequívoco sin RD              | RD único                              |
+| VLAN Group                    | ámbito + nombre                           | ámbito + slug                         |
+| VLAN                          | grupo + VID                               | grupo + nombre                        |
+| Prefix                        | VRF + prefijo canónico                    | dependencias de VRF/VLAN              |
+| IP Address                    | VRF + dirección con máscara               | dependencias de VRF/prefijo           |
+| Custom Field                  | nombre                                    | tipo y object types compatibles       |
+| Site/Location/Rack            | slug o nombre dentro de Site/Location     | jerarquía y Site obligatorios         |
+| Manufacturer/Device Type/Role | slug; Device Type usa Manufacturer + slug | dependencias DCIM                     |
+| Device                        | Site + nombre                             | Site, Role y Device Type obligatorios |
+| Interface/MAC                 | Device + nombre; dirección MAC canónica   | padre y formato válidos               |
+| Provider/Circuit Type/Circuit | slug o CID                                | terminaciones inequívocas             |
+| RIR/ASN                       | slug o ASN                                | creación de RIR aprobada              |
 
 Los planes son inmutables y quedan vinculados a los snapshots, el mapeo, el
 idioma del artefacto, la instancia NetBox y la versión de API. La aprobación
@@ -65,7 +69,9 @@ misma fuente + mismo mapeo + snapshot producción → plan de producción
 Un plan del sandbox no puede aplicarse en producción porque la huella del
 destino es diferente. La aplicación y la verificación quedan fijadas al destino
 registrado en el plan; pasar del ensayo a producción requiere un nuevo plan
-hermano.
+hermano. Después de verificar con éxito, la planificación permanece
+deshabilitada hasta actualizar el snapshot del destino, evitando usar el
+inventario anterior a la aplicación.
 
 ## Secretos, auditoría y bundles
 
@@ -79,10 +85,13 @@ Laravel sigue aplicando `IPAMFERRY_DUMP_MAX_BYTES`. El login tiene rate limit
 con una clave anonimizada de correo/IP, y el locale solo cambia en pantalla
 después de persistir el cookie o la preferencia del usuario.
 
-Los bundles contienen manifiesto versionado, `mapping.json` y `plan.json`
-canónicos, informes HTML/JSON localizados, datos preservados, checkpoints y
-eventos saneados. Las claves para máquinas y la salida CLI permanecen en
-inglés. IpamFerry nunca genera ni modifica un dump PostgreSQL de NetBox.
+Los bundles contienen versiones de mapping y plan, `mapping.json` y
+`plan.json` canónicos, cobertura, referencias propuestas, decisiones de
+preservación, informes localizados, checkpoints y eventos saneados. Las claves
+para máquinas y la salida CLI permanecen en inglés. IpamFerry nunca genera ni
+modifica un dump PostgreSQL de NetBox.
 
-La referencia detallada en portugués está en
-[ARQUITETURA.md](ARQUITETURA.md).
+La matriz soportada es phpIPAM 1.5–1.8 y NetBox 4.4–4.6; el sandbox está fijado
+en 4.6.1. Consulta [Mapping Studio](MAPPING-STUDIO.es.md),
+[ADR-002](adr/0002-mapping-v2-plan-v3.es.md) y la referencia detallada en
+portugués [ARQUITETURA.md](ARQUITETURA.md).

@@ -16,26 +16,32 @@ data. SQL is never executed. NetBox discovery uses the REST API, follows
 pagination and reads `OPTIONS` metadata to validate required fields, choices
 and value constraints for the detected version.
 
-The automatic scope currently covers VRFs, VLAN Groups, VLANs, Prefixes, IP
-Addresses and explicitly approved custom fields. Sections, devices, racks,
-NAT, DNS, permissions and extension data without a safe equivalent are kept in
-the preservation report.
+The automatic scope covers safe IPAM, Tenancy, DCIM, Circuits, and ASN
+equivalences. PAT, BGP sessions, authoritative DNS, permissions, and extension
+data without a safe equivalent remain in the preservation report.
 
-The mapping policy is versioned JSON and cannot execute code. Existing NetBox
-objects are reused by default. Updates are opt-in per object type and field.
-Ambiguous matches, missing dependencies, duplicate claims, uniqueness
-collisions and incompatible write schemas are blocking conflicts.
+Mapping Studio edits versioned JSON that cannot execute code. Deterministic
+suggestions require acceptance, optimistic revisions prevent silent
+overwrites, and temporary previews use the same planner as official plans.
+Existing NetBox objects are reused by default. Updates are opt-in per object
+type and field.
 
 ## Identity and execution safety
 
-| NetBox object | Primary identity | Additional checked constraint |
-| --- | --- | --- |
-| VRF | RD; unambiguous name without RD | unique RD |
-| VLAN Group | scope + name | scope + slug |
-| VLAN | group + VID | group + name |
-| Prefix | VRF + canonical prefix | VRF/VLAN dependencies |
-| IP Address | VRF + masked address | VRF/prefix dependencies |
-| Custom Field | name | compatible type and object types |
+| NetBox object                 | Primary identity                           | Additional checked constraint         |
+| ----------------------------- | ------------------------------------------ | ------------------------------------- |
+| VRF                           | RD; unambiguous name without RD            | unique RD                             |
+| VLAN Group                    | scope + name                               | scope + slug                          |
+| VLAN                          | group + VID                                | group + name                          |
+| Prefix                        | VRF + canonical prefix                     | VRF/VLAN dependencies                 |
+| IP Address                    | VRF + masked address                       | VRF/prefix dependencies               |
+| Custom Field                  | name                                       | compatible type and object types      |
+| Site/Location/Rack            | slug or name within Site/Location          | resolved ancestry and mandatory Site  |
+| Manufacturer/Device Type/Role | slug; Device Type uses Manufacturer + slug | mandatory DCIM dependencies           |
+| Device                        | Site + name                                | mandatory Site, Role, and Device Type |
+| Interface/MAC                 | Device + name; canonical MAC address       | valid parent and format               |
+| Provider/Circuit Type/Circuit | slug or CID                                | unambiguous terminations              |
+| RIR/ASN                       | slug or ASN                                | approved RIR creation                 |
 
 Plans are immutable and bound to source snapshot, target snapshot, mapping,
 artifact locale, NetBox instance and API version. Approval applies to one exact
@@ -69,6 +75,8 @@ same source + same mapping + production snapshot → production plan
 A sandbox plan cannot be applied to production because its target fingerprint
 does not match. Apply and verification are locked to the target recorded in
 the plan; moving from rehearsal to production requires a new sibling plan.
+After successful verification, planning stays disabled until the target
+snapshot is refreshed, preventing use of inventory captured before apply.
 
 ## Secrets, audit and bundles
 
@@ -83,10 +91,13 @@ Laravel still enforces `IPAMFERRY_DUMP_MAX_BYTES`. Login is rate-limited using
 an anonymized email/IP key, and locale changes become visible only after their
 cookie or user preference has been persisted.
 
-Bundles contain a versioned manifest, canonical `mapping.json` and `plan.json`,
-localized HTML/JSON reports, preservation data, checkpoints and sanitized audit
-events. Canonical machine keys and CLI output remain in English. IpamFerry
-never produces or modifies a NetBox PostgreSQL dump.
+Bundles contain mapping and plan schema versions, canonical `mapping.json` and
+`plan.json`, coverage, proposed references, preservation decisions, localized
+HTML/JSON reports, checkpoints, and sanitized audit events. Canonical machine
+keys and CLI output remain in English. IpamFerry never produces or modifies a
+NetBox PostgreSQL dump.
 
-For the detailed Portuguese reference, see
-[ARQUITETURA.md](ARQUITETURA.md).
+The supported matrix is phpIPAM 1.5–1.8 and NetBox 4.4–4.6; the sandbox is
+pinned to 4.6.1. See [Mapping Studio](MAPPING-STUDIO.en.md),
+[ADR-002](adr/0002-mapping-v2-plan-v3.en.md), and the detailed Portuguese
+reference [ARQUITETURA.md](ARQUITETURA.md).

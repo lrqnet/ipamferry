@@ -35,6 +35,10 @@ class ApiClientsTest extends TestCase
         self::assertSame('Blue', $inventory['objects']['vrfs'][0]['name']);
         Http::assertSent(fn (Request $request): bool => $request->url() === 'https://phpipam.example.test/api/ipamferry/vrf/');
         Http::assertNotSent(fn (Request $request): bool => str_contains($request->url(), '/vrfs/'));
+        Http::assertSent(fn (Request $request): bool => $request->url() === 'https://phpipam.example.test/api/ipamferry/circuits/');
+        Http::assertSent(fn (Request $request): bool => $request->url() === 'https://phpipam.example.test/api/ipamferry/circuits/providers/');
+        Http::assertNotSent(fn (Request $request): bool => str_contains($request->url(), '/tools/circuit'));
+        self::assertSame([], $inventory['objects']['circuit_types']);
         Http::assertSent(fn (Request $request): bool => $request->hasHeader('phpipam-token', 'phpipam-test-token')
             && ! str_contains($request->url(), 'phpipam-test-token'));
     }
@@ -94,5 +98,39 @@ class ApiClientsTest extends TestCase
         (new NetBoxClient('https://netbox.example.test', 'legacy-test-token'))->inspect();
 
         Http::assertSent(fn (Request $request): bool => $request->hasHeader('Authorization', 'Token legacy-test-token'));
+    }
+
+    public function test_scoped_dcim_natural_keys_do_not_cross_sites_or_manufacturers(): void
+    {
+        $client = new NetBoxClient('https://netbox.example.test', 'nbt_test.key-secret');
+
+        self::assertTrue($client->matchesNaturalKey('device', [
+            'name' => 'edge-01',
+            'site' => ['id' => 10],
+        ], [
+            'name' => 'EDGE-01',
+            'site_id' => 10,
+        ]));
+        self::assertFalse($client->matchesNaturalKey('device', [
+            'name' => 'edge-01',
+            'site' => ['id' => 11],
+        ], [
+            'name' => 'edge-01',
+            'site_id' => 10,
+        ]));
+        self::assertTrue($client->matchesNaturalKey('device_type', [
+            'slug' => 'router-1000',
+            'manufacturer' => ['id' => 20],
+        ], [
+            'slug' => 'router-1000',
+            'manufacturer_id' => 20,
+        ]));
+        self::assertFalse($client->matchesNaturalKey('device_type', [
+            'slug' => 'router-1000',
+            'manufacturer' => ['id' => 21],
+        ], [
+            'slug' => 'router-1000',
+            'manufacturer_id' => 20,
+        ]));
     }
 }

@@ -46,7 +46,8 @@ há arquivo `.env` operacional.
 1. Crie um projeto e selecione **API phpIPAM** ou **mysqldump SQL**.
 2. Descubra a origem e o destino. Tokens existem apenas na memória da
    requisição e nunca entram no banco, na fila ou no bundle.
-3. Revise o inventário canônico e a política de mapeamento não executável.
+3. Use o **Mapping Studio** para revisar objetos, referências, campos, status,
+   updates e relações; valide o resultado em um preview não aplicável.
 4. Gere um plano específico para aquela origem, destino, versão de API,
    mapeamento e idioma.
 5. Resolva todos os conflitos. Um `owner` ou `administrator` aprova o
@@ -55,10 +56,16 @@ há arquivo `.env` operacional.
    a mesma execução sem duplicar objetos.
 7. Verifique por IDs e chaves naturais e baixe o bundle auditável.
 
-O escopo automático atual cobre VRFs, VLAN Groups, VLANs, Prefixes, IP
-Addresses e custom fields aprovados. Sections, devices, racks, NAT, DNS,
-permissões e extensões são catalogados e preservados quando não existe
-equivalência segura; eles não são descartados silenciosamente.
+O escopo automático cobre o núcleo IPAM e equivalências seguras de Tenancy,
+DCIM e Circuits: tenants, tags, sites, locations, racks, manufacturers, device
+types, roles, devices, interfaces, MACs, providers, circuit types, circuits,
+RIRs, ASNs, VRFs, VLAN Groups, VLANs, Prefixes, IP Addresses e custom fields
+aprovados. Primary IP, terminações e NAT estático 1:1 são relações posteriores
+que exigem correspondência inequívoca e aprovação.
+
+PAT, sessões BGP, DNS autoritativo, permissões e extensões sem equivalente
+seguro são preservados e explicados, nunca convertidos parcialmente ou
+descartados silenciosamente.
 
 Atualizações de objetos existentes são desativadas por padrão e habilitadas
 por tipo e campo na política. Restrições anunciadas pelo `OPTIONS` do NetBox,
@@ -124,7 +131,9 @@ docker compose exec \
 ```
 
 Detalhes do modelo, chaves naturais, estados e limites estão em
-[docs/ARQUITETURA.md](docs/ARQUITETURA.md).
+[docs/ARQUITETURA.md](docs/ARQUITETURA.md). O editor, schemas v2/v3,
+compatibilidade e aprovações estão em
+[docs/MAPPING-STUDIO.md](docs/MAPPING-STUDIO.md).
 
 ## Dados sem equivalente
 

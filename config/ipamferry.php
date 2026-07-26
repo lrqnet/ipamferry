@@ -13,7 +13,9 @@ return [
     'api_max_response_bytes' => (int) env('IPAMFERRY_API_MAX_RESPONSE_BYTES', 268_435_456),
     'apply_batch_size' => (int) env('IPAMFERRY_APPLY_BATCH_SIZE', 25),
     'operation_lock_seconds' => (int) env('IPAMFERRY_OPERATION_LOCK_SECONDS', 14_400),
+    'mapping_preview_minutes' => (int) env('IPAMFERRY_MAPPING_PREVIEW_MINUTES', 60),
     'sandbox_url' => env('IPAMFERRY_SANDBOX_URL', 'http://sandbox-netbox:8080'),
+    'sandbox_probe_timeout_seconds' => (int) env('IPAMFERRY_SANDBOX_PROBE_TIMEOUT_SECONDS', 15),
     'sandbox_api_key_file' => env('IPAMFERRY_SANDBOX_API_KEY_FILE', '/run/ipamferry-secrets/superuser_api_key'),
     'sandbox_api_token_file' => env('IPAMFERRY_SANDBOX_API_TOKEN_FILE', '/run/ipamferry-secrets/superuser_api_token'),
 ];

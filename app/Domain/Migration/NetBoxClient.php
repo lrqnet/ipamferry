@@ -11,23 +11,18 @@ use Throwable;
 
 class NetBoxClient
 {
-    private const ENDPOINTS = [
-        'vrf' => 'ipam/vrfs/',
-        'vlan_group' => 'ipam/vlan-groups/',
-        'vlan' => 'ipam/vlans/',
-        'prefix' => 'ipam/prefixes/',
-        'ip_address' => 'ipam/ip-addresses/',
-        'custom_field' => 'extras/custom-fields/',
-    ];
-
     private string $url;
+
+    private ResourceRegistry $resources;
 
     public function __construct(
         string $url,
         private readonly string $token,
         ?EndpointPolicy $policy = null,
+        ?ResourceRegistry $resources = null,
     ) {
         $this->url = ($policy ?? new EndpointPolicy)->canonicalize($url);
+        $this->resources = $resources ?? new ResourceRegistry;
     }
 
     public function inspect(): array
@@ -53,25 +48,23 @@ class NetBoxClient
     public function inventory(): array
     {
         $capabilities = $this->inspect();
+        if (! (new CompatibilityMatrix)->netBox((string) $capabilities['version'])) {
+            throw new ExternalApiException('NetBox', 'checking supported version 4.4 through 4.6');
+        }
         $warnings = [];
         $objects = [
-            'vrfs' => $this->getAll('ipam/vrfs/'),
-            'vlan_groups' => $this->getAll('ipam/vlan-groups/'),
-            'vlans' => $this->getAll('ipam/vlans/'),
-            'prefixes' => $this->getAll('ipam/prefixes/'),
-            'ip_addresses' => $this->getAll('ipam/ip-addresses/'),
             'ipam_roles' => $this->getAll('ipam/roles/'),
             'route_targets' => $this->getAll('ipam/route-targets/'),
-            'tags' => $this->getAll('extras/tags/'),
-            'custom_fields' => $this->getAll('extras/custom-fields/'),
         ];
         $writeSchema = [];
-        foreach (self::ENDPOINTS as $type => $endpoint) {
+        foreach ($this->resources->all() as $type => $definition) {
+            $endpoint = $definition['endpoint'];
+            $objects[$definition['collection']] = $this->getAllOptional($endpoint, $warnings);
             $writeSchema[$type] = $this->writeSchema($endpoint, $warnings);
         }
 
         return [
-            'schema_version' => 1,
+            'schema_version' => 2,
             'instance' => (new EndpointPolicy)->instance('netbox', $this->url, $capabilities),
             'discovered_at' => now()->toIso8601String(),
             'objects' => $objects,
@@ -82,8 +75,53 @@ class NetBoxClient
 
     public function findMatches(string $targetType, array $naturalKey): array
     {
-        $endpoint = self::ENDPOINTS[$targetType] ?? throw new \InvalidArgumentException("Unsupported NetBox target type: {$targetType}");
+        $endpoint = $this->resources->endpoint($targetType);
         $filters = match ($targetType) {
+            'tenant', 'site', 'manufacturer', 'device_role', 'provider', 'circuit_type', 'rir', 'tag', 'contact_role' => [
+                'slug' => $naturalKey['slug'],
+            ],
+            'device_type' => [
+                'slug' => $naturalKey['slug'],
+                'manufacturer_id' => $naturalKey['manufacturer_id'],
+            ],
+            'contact' => [
+                'name' => $naturalKey['name'],
+                'email' => $naturalKey['email'] ?? '',
+            ],
+            'contact_assignment' => [
+                'object_type' => $naturalKey['object_type'],
+                'object_id' => $naturalKey['object_id'],
+                'contact_id' => $naturalKey['contact_id'],
+                'role_id' => $naturalKey['role_id'],
+            ],
+            'location' => [
+                'slug' => $naturalKey['slug'],
+                ...$this->scopeFilter('site_id', $naturalKey['site_id'] ?? null),
+                ...$this->scopeFilter('parent_id', $naturalKey['parent_id'] ?? null),
+            ],
+            'rack' => [
+                'name__ie' => $naturalKey['name'],
+                ...$this->scopeFilter('site_id', $naturalKey['site_id'] ?? null),
+                ...$this->scopeFilter('location_id', $naturalKey['location_id'] ?? null),
+            ],
+            'device' => [
+                'name__ie' => $naturalKey['name'],
+                'site_id' => $naturalKey['site_id'],
+            ],
+            'interface' => [
+                'name' => $naturalKey['name'],
+                'device_id' => $naturalKey['device_id'],
+            ],
+            'mac_address' => ['mac_address' => $naturalKey['mac_address']],
+            'circuit' => [
+                'cid' => $naturalKey['cid'],
+                'provider_id' => $naturalKey['provider_id'],
+            ],
+            'circuit_termination' => [
+                'circuit_id' => $naturalKey['circuit_id'],
+                'term_side' => $naturalKey['term_side'],
+            ],
+            'asn' => ['asn' => $naturalKey['asn']],
             'vrf' => isset($naturalKey['rd']) && $naturalKey['rd'] !== ''
                 ? ['rd' => $naturalKey['rd']]
                 : ['name__ie' => $naturalKey['name']],
@@ -104,6 +142,7 @@ class NetBoxClient
                 ...$this->scopeFilter('vrf_id', $naturalKey['vrf_id'] ?? null),
             ],
             'custom_field' => ['name' => $naturalKey['name']],
+            default => throw new \InvalidArgumentException("Unsupported NetBox natural key for {$targetType}"),
         };
 
         return array_values(array_filter(
@@ -114,7 +153,7 @@ class NetBoxClient
 
     public function detail(string $targetType, int $id): array
     {
-        $endpoint = self::ENDPOINTS[$targetType] ?? throw new \InvalidArgumentException("Unsupported NetBox target type: {$targetType}");
+        $endpoint = $this->resources->endpoint($targetType);
         $response = $this->sendRead('GET', "{$endpoint}{$id}/", [], "reading {$targetType} {$id}");
 
         return [
@@ -126,7 +165,7 @@ class NetBoxClient
 
     public function create(string $targetType, array $payload, string $changelogMessage): array
     {
-        $endpoint = self::ENDPOINTS[$targetType] ?? throw new \InvalidArgumentException("Unsupported NetBox target type: {$targetType}");
+        $endpoint = $this->resources->endpoint($targetType);
         $response = $this->sendWrite(
             'POST',
             $endpoint,
@@ -142,7 +181,7 @@ class NetBoxClient
 
     public function update(string $targetType, int $id, array $payload, ?string $etag, string $changelogMessage): array
     {
-        $endpoint = self::ENDPOINTS[$targetType] ?? throw new \InvalidArgumentException("Unsupported NetBox target type: {$targetType}");
+        $endpoint = $this->resources->endpoint($targetType);
         $request = $this->request(false);
         if ($etag !== null && $etag !== '') {
             $request = $request->withHeaders(['If-Match' => $etag]);
@@ -218,11 +257,47 @@ class NetBoxClient
         return $all;
     }
 
+    private function getAllOptional(string $endpoint, array &$warnings): array
+    {
+        try {
+            return $this->getAll($endpoint);
+        } catch (ExternalApiException $exception) {
+            $warnings[] = $exception->getMessage();
+
+            return [];
+        }
+    }
+
     public function matchesNaturalKey(string $type, array $object, array $key): bool
     {
         $relatedId = fn (mixed $value): ?int => is_array($value) ? ($value['id'] ?? null) : ($value === null ? null : (int) $value);
 
         return match ($type) {
+            'tenant', 'site', 'manufacturer', 'device_role', 'provider', 'circuit_type', 'rir', 'tag', 'contact_role' => (string) ($object['slug'] ?? '') === (string) ($key['slug'] ?? ''),
+            'device_type' => (string) ($object['slug'] ?? '') === (string) ($key['slug'] ?? '')
+                && $relatedId($object['manufacturer'] ?? null) === ($key['manufacturer_id'] ?? null),
+            'contact' => (string) ($object['name'] ?? '') === (string) ($key['name'] ?? '')
+                && (string) ($object['email'] ?? '') === (string) ($key['email'] ?? ''),
+            'contact_assignment' => (string) ($object['object_type'] ?? '') === (string) ($key['object_type'] ?? '')
+                && $relatedId($object['object'] ?? $object['object_id'] ?? null) === ($key['object_id'] ?? null)
+                && $relatedId($object['contact'] ?? null) === ($key['contact_id'] ?? null)
+                && $relatedId($object['role'] ?? null) === ($key['role_id'] ?? null),
+            'location' => (string) ($object['slug'] ?? '') === (string) ($key['slug'] ?? '')
+                && $relatedId($object['site'] ?? null) === ($key['site_id'] ?? null)
+                && $relatedId($object['parent'] ?? null) === ($key['parent_id'] ?? null),
+            'rack' => mb_strtolower((string) ($object['name'] ?? '')) === mb_strtolower((string) ($key['name'] ?? ''))
+                && $relatedId($object['site'] ?? null) === ($key['site_id'] ?? null)
+                && $relatedId($object['location'] ?? null) === ($key['location_id'] ?? null),
+            'device' => mb_strtolower((string) ($object['name'] ?? '')) === mb_strtolower((string) ($key['name'] ?? ''))
+                && $relatedId($object['site'] ?? null) === ($key['site_id'] ?? null),
+            'interface' => (string) ($object['name'] ?? '') === (string) ($key['name'] ?? '')
+                && $relatedId($object['device'] ?? null) === ($key['device_id'] ?? null),
+            'mac_address' => strtoupper((string) ($object['mac_address'] ?? '')) === strtoupper((string) ($key['mac_address'] ?? '')),
+            'circuit' => (string) ($object['cid'] ?? '') === (string) ($key['cid'] ?? '')
+                && $relatedId($object['provider'] ?? null) === ($key['provider_id'] ?? null),
+            'circuit_termination' => $relatedId($object['circuit'] ?? null) === ($key['circuit_id'] ?? null)
+                && (string) ($object['term_side']['value'] ?? $object['term_side'] ?? '') === (string) ($key['term_side'] ?? ''),
+            'asn' => (int) ($object['asn'] ?? 0) === (int) ($key['asn'] ?? -1),
             'vrf' => isset($key['rd']) && $key['rd'] !== ''
                 ? (string) ($object['rd'] ?? '') === (string) $key['rd']
                 : mb_strtolower((string) ($object['name'] ?? '')) === mb_strtolower((string) $key['name']),

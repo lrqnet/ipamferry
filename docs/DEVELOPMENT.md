@@ -57,13 +57,20 @@ jornada completa também sobe o perfil sandbox:
 
 ```bash
 npm ci --ignore-scripts
-npx playwright install chromium
+npx playwright install chromium firefox webkit
 ./scripts/e2e-test.sh chromium
 ```
 
 Use `./scripts/e2e-test.sh all` para Chromium, Firefox e WebKit. O script
-configura `IPAMFERRY_BIND_IP=127.0.0.1`, usa `https://localhost:18444` e injeta
-o token de instalação somente no processo Playwright.
+cria uma stack e volumes novos para cada navegador, configura
+`IPAMFERRY_BIND_IP=127.0.0.1`, usa `https://localhost:18444` e injeta o token
+de instalação somente no processo Playwright.
+
+Durante diagnóstico, `IPAMFERRY_E2E_KEEP_FAILED=1` mantém apenas a stack E2E
+isolada quando o navegador falha. `IPAMFERRY_E2E_NETBOX_SEED` pode apontar para
+um dump custom do PostgreSQL já migrado e compatível com NetBox 4.6.1; o script
+remove todos os tokens NetBox restaurados antes de iniciar o sandbox. O arquivo
+é temporário, não deve entrar no repositório e deve ser apagado após os testes.
 
 ## Verificações sem Docker
 

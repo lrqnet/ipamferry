@@ -17,13 +17,14 @@ coleções e consulta `OPTIONS` para capturar campos obrigatórios, choices e
 limites da versão encontrada.
 
 `normalize` converte os registros para um snapshot intermediário versionado.
-O escopo automático atual é VRF, VLAN Group, VLAN, Prefix, IP Address e custom
-fields explicitamente mapeados. Dados sem conversão segura permanecem no
-snapshot de preservação.
+O escopo automático cobre equivalências seguras de IPAM, Tenancy, DCIM,
+Circuits e ASN. PAT, sessões BGP, DNS autoritativo, permissões e extensões sem
+equivalência permanecem no snapshot de preservação.
 
-`map` aceita somente uma política JSON versionada. As ações permitidas para
-custom fields são copiar, ignorar, valor fixo, concatenar, normalizar e lookup.
-Não há PHP, JavaScript, template ou expressão arbitrária.
+`map` usa o Mapping Studio e uma política JSON versionada. As ações permitidas
+são copiar, ignorar, valor fixo, concatenar, normalizar e lookup. Não há PHP,
+JavaScript, template ou expressão arbitrária. Sugestões determinísticas exigem
+aceite e o preview temporário usa o mesmo planejador do plano oficial.
 
 `plan` é somente leitura. O resultado contém ações ordenadas, conflitos,
 avisos, dados preservados, fingerprints e a identidade do destino. `apply`
@@ -32,14 +33,20 @@ outra instância/versão do NetBox.
 
 ## Identidades e dependências
 
-| Objeto NetBox | Identidade primária do IpamFerry | Restrições adicionais verificadas |
-| --- | --- | --- |
-| VRF | RD; sem RD, nome inequívoco | RD único |
-| VLAN Group | escopo + nome | escopo + slug |
-| VLAN | grupo + VID | grupo + nome |
-| Prefix | VRF + prefixo canônico | dependências de VRF/VLAN |
-| IP Address | VRF + endereço com máscara | dependências de VRF/prefixo |
-| Custom Field | nome | tipo e object types compatíveis |
+| Objeto NetBox                 | Identidade primária do IpamFerry          | Restrições adicionais verificadas |
+| ----------------------------- | ----------------------------------------- | --------------------------------- |
+| VRF                           | RD; sem RD, nome inequívoco               | RD único                          |
+| VLAN Group                    | escopo + nome                             | escopo + slug                     |
+| VLAN                          | grupo + VID                               | grupo + nome                      |
+| Prefix                        | VRF + prefixo canônico                    | dependências de VRF/VLAN          |
+| IP Address                    | VRF + endereço com máscara                | dependências de VRF/prefixo       |
+| Custom Field                  | nome                                      | tipo e object types compatíveis   |
+| Site/Location/Rack            | slug ou nome dentro de Site/Location      | ancestral e Site obrigatórios     |
+| Manufacturer/Device Type/Role | slug; Device Type usa Manufacturer + slug | dependências DCIM obrigatórias    |
+| Device                        | Site + nome                               | Site, Role e Device Type          |
+| Interface/MAC                 | Device + nome; endereço MAC canônico      | pai e formato válidos             |
+| Provider/Circuit Type/Circuit | slug ou CID                               | terminações inequívocas           |
+| RIR/ASN                       | slug ou ASN                               | RIR aprovado quando criado        |
 
 Uma correspondência múltipla, uma referência ausente ou duas origens
 reivindicando a mesma identidade gera conflito impeditivo. Restrições de
@@ -51,8 +58,10 @@ Depois da primeira aplicação, `migration_object_links` associa
 do destino. O vínculo tem precedência sobre chaves naturais em migrações
 posteriores, mas um destino removido ou de tipo incompatível bloqueia o plano.
 
-A ordem é calculada como grafo: custom fields, VRFs/VLAN Groups, VLANs,
-Prefixes e IP Addresses. Ciclos não são executados.
+A ordem é calculada como grafo: custom fields/tags/tenants, sites/locations,
+racks, manufacturers/device types/roles, devices/interfaces/MACs,
+providers/circuitos, RIRs/ASNs, VRFs/VLANs/prefixes/IPs e, por fim,
+atribuições/primary IP/NAT. Ciclos não são executados.
 
 ## Criação, reutilização e atualização
 
@@ -107,7 +116,9 @@ O plano do sandbox não pode ser aplicado em produção porque o fingerprint da
 instância e da versão da API é diferente.
 Depois da aprovação, `apply` e `verify` fixam o seletor de destino no valor
 gravado no plano; trocar de sandbox para produção exige redescobrir o destino
-e gerar um plano irmão.
+e gerar um plano irmão. Depois de uma verificação bem-sucedida, o planejamento
+permanece desabilitado até que o snapshot do destino seja atualizado, evitando
+usar inventário anterior à aplicação.
 
 ## Serviços Compose
 
@@ -148,8 +159,9 @@ Falhas são removidas pelo scheduler conforme `IPAMFERRY_DUMP_RETENTION_HOURS`.
 Cada evento relevante registra ator, projeto, plano, execução, tipo, nível e
 contexto sanitizado. O bundle ZIP inclui:
 
-- manifesto com schema, versão, locale e fingerprints;
+- manifesto com schema, versões de mapping/plano, locale e fingerprints;
 - `mapping.json` e `plan.json` com chaves canônicas em inglês;
+- `coverage.json`, referências propostas e decisões de preservação;
 - relatório HTML/JSON e preservação no locale imutável do plano;
 - resultados/checkpoints e eventos de auditoria;
 - payloads reexecutáveis sem credenciais.
@@ -163,3 +175,7 @@ malformadas, versões não informadas, paginação além do limite, schema de es
 indisponível ou payload fora das restrições falham antes da mutação. URLs são
 HTTPS por padrão; HTTP só é permitido quando habilitado explicitamente ou para
 o endpoint interno exato do sandbox. Redirects são desativados.
+
+A matriz suportada é phpIPAM 1.5–1.8 e NetBox 4.4–4.6; o sandbox permanece
+fixado em 4.6.1. Consulte [Mapping Studio](MAPPING-STUDIO.md) e os
+[ADRs](adr/0002-mapping-v2-plan-v3.md).

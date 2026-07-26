@@ -70,6 +70,10 @@ class MigrationLifecycleTest extends TestCase
         self::assertTrue($verification['passed']);
         self::assertSame(1, $verification['checked']);
         self::assertSame(MigrationExecutionStatus::Verified, $sameExecution->refresh()->status);
+        $this->actingAs($user)
+            ->post(route('projects.plan', $project))
+            ->assertStatus(422);
+        self::assertCount(1, $project->plans);
         self::assertStringNotContainsString(
             'runtime-token',
             json_encode([

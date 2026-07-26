@@ -19,6 +19,7 @@ class MigrationApplier
         private readonly PlanIntegrity $integrity,
         private readonly MigrationAudit $audit,
         private readonly MigrationOperationLock $operations,
+        private readonly NetBoxPayloadComparator $payloadComparator,
     ) {}
 
     public function apply(
@@ -186,6 +187,9 @@ class MigrationApplier
 
                 return true;
             }
+            if ($action['operation'] === 'relation') {
+                return $this->applyRelationAction($project, $plan, $execution, $client, $result, $action);
+            }
 
             $payload = $this->resolveReferences($action['payload'], $execution);
             $naturalKey = $this->resolveReferences($action['natural_key'], $execution);
@@ -295,6 +299,61 @@ class MigrationApplier
         }
     }
 
+    private function applyRelationAction(
+        MigrationProject $project,
+        MigrationPlan $plan,
+        MigrationExecution $execution,
+        NetBoxClient $client,
+        MigrationActionResult $result,
+        array $action,
+    ): bool {
+        $targetId = $this->resolveReferences($action['subject_ref'] ?? [], $execution);
+        if (! is_int($targetId) || $targetId <= 0) {
+            throw new DomainException("Relation action {$action['action_key']} has no resolved subject.");
+        }
+        $payload = $this->resolveReferences($action['payload'], $execution);
+        $detail = $client->detail($action['target_type'], $targetId);
+        $target = $detail['data'];
+        $requestId = null;
+        $status = MigrationActionStatus::Reused;
+        if ($this->differences($payload, $target) !== []) {
+            $response = $client->update(
+                $action['target_type'],
+                $targetId,
+                $payload,
+                $detail['etag'],
+                $this->changelogMessage($project, $plan, $action),
+            );
+            $target = $response['data'];
+            $requestId = $response['request_id'];
+            $status = MigrationActionStatus::Updated;
+        }
+        $result->update([
+            'status' => $status,
+            'target_id' => $targetId,
+            'request_id' => $requestId,
+            'result' => $this->safeTargetSnapshot($target),
+            'completed_at' => now(),
+        ]);
+        MigrationObjectLink::query()->updateOrCreate(
+            [
+                'project_id' => $project->id,
+                'source_instance_fingerprint' => $project->source_instance['fingerprint'],
+                'source_type' => $action['source_type'],
+                'source_id' => (string) $action['source_id'],
+                'target_instance_fingerprint' => $plan->target_instance_fingerprint,
+            ],
+            [
+                'target_type' => $action['target_type'],
+                'target_id' => $targetId,
+                'natural_key' => CanonicalJson::encode(['relation' => $action['relation'] ?? null]),
+                'target_snapshot' => $this->safeTargetSnapshot($target),
+            ],
+        );
+
+        return true;
+    }
+
     private function execution(MigrationProject $project, MigrationPlan $plan, ?int $userId): MigrationExecution
     {
         $existing = MigrationExecution::query()
@@ -398,31 +457,7 @@ class MigrationApplier
 
     private function differences(array $expected, array $actual): array
     {
-        $differences = [];
-        foreach ($expected as $field => $value) {
-            $actualValue = $actual[$field] ?? null;
-            if (is_array($actualValue) && array_key_exists('value', $actualValue)) {
-                $actualValue = $actualValue['value'];
-            } elseif (is_array($actualValue) && array_key_exists('id', $actualValue)) {
-                $actualValue = $actualValue['id'];
-            }
-
-            if ($field === 'custom_fields' && is_array($value)) {
-                foreach ($value as $customField => $customValue) {
-                    $current = $actual['custom_fields'][$customField] ?? null;
-                    if (is_array($current) && array_key_exists('value', $current)) {
-                        $current = $current['value'];
-                    }
-                    if ($current !== $customValue) {
-                        $differences["custom_fields.{$customField}"] = true;
-                    }
-                }
-            } elseif ($actualValue !== $value) {
-                $differences[$field] = true;
-            }
-        }
-
-        return $differences;
+        return $this->payloadComparator->differences($expected, $actual);
     }
 
     private function summary(MigrationExecution $execution, int $total): array

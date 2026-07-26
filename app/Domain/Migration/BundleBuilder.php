@@ -82,6 +82,17 @@ class BundleBuilder
                 'data' => $plan->preservation,
             ]),
             'report.html' => $this->html($report, $locale),
+            'coverage.json' => $this->json($this->coverage($plan)),
+            'proposed-references.json' => $this->json([
+                'schema_version' => 1,
+                'reference_rules' => $plan->mapping_snapshot['reference_rules'] ?? [],
+                'relation_rules' => $plan->mapping_snapshot['relation_rules'] ?? [],
+            ]),
+            'preservation-decisions.json' => $this->json([
+                'schema_version' => 1,
+                'rules' => $plan->mapping_snapshot['preservation_rules'] ?? [],
+                'preservation' => $plan->preservation,
+            ]),
         ];
         if ($execution !== null) {
             $files['execution.json'] = $this->json([
@@ -119,8 +130,10 @@ class BundleBuilder
         ]);
 
         $manifest = [
-            'schema_version' => 1,
+            'schema_version' => 2,
             'ipamferry_version' => config('ipamferry.version'),
+            'mapping_schema_version' => $plan->mapping_snapshot['schema_version'] ?? 1,
+            'plan_schema_version' => $plan->schema_version,
             'project_id' => $project->id,
             'plan_id' => $plan->id,
             'fingerprint' => $plan->fingerprint,
@@ -156,6 +169,16 @@ class BundleBuilder
 
     private function localizedWarning(string $warning, string $locale): string
     {
+        if (str_starts_with($warning, '{')) {
+            try {
+                $issue = json_decode($warning, true, 64, JSON_THROW_ON_ERROR);
+                $reason = is_array($issue) ? ($issue['reason'] ?? null) : null;
+                if (is_string($reason) && Lang::has("ipamferry.report.issues.{$reason}", $locale)) {
+                    return Lang::get("ipamferry.report.issues.{$reason}", [], $locale);
+                }
+            } catch (\JsonException) {
+            }
+        }
         if (preg_match('/^([a-z0-9_]+) require mapping review before export to NetBox\.$/', $warning, $matches)) {
             return Lang::get('ipamferry.report.warning', ['type' => $matches[1]], $locale);
         }
@@ -190,5 +213,31 @@ class BundleBuilder
         }
 
         return $summary;
+    }
+
+    private function coverage(MigrationPlan $plan): array
+    {
+        $sourceTypes = [];
+        $targetTypes = [];
+        $operations = [];
+        foreach ($plan->actions as $action) {
+            $sourceType = (string) ($action['source_type'] ?? 'unknown');
+            $targetType = (string) ($action['target_type'] ?? 'unknown');
+            $operation = (string) ($action['operation'] ?? 'unknown');
+            $sourceTypes[$sourceType] = ($sourceTypes[$sourceType] ?? 0) + 1;
+            $targetTypes[$targetType] = ($targetTypes[$targetType] ?? 0) + 1;
+            $operations[$operation] = ($operations[$operation] ?? 0) + 1;
+        }
+        ksort($sourceTypes, SORT_STRING);
+        ksort($targetTypes, SORT_STRING);
+        ksort($operations, SORT_STRING);
+
+        return [
+            'schema_version' => 1,
+            'source_types' => $sourceTypes,
+            'target_types' => $targetTypes,
+            'operations' => $operations,
+            'preservation' => $this->preservationSummary($plan->preservation),
+        ];
     }
 }

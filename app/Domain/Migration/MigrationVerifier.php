@@ -17,6 +17,7 @@ class MigrationVerifier
         private readonly PlanIntegrity $integrity,
         private readonly MigrationAudit $audit,
         private readonly MigrationOperationLock $operations,
+        private readonly NetBoxPayloadComparator $payloadComparator,
     ) {}
 
     public function verify(
@@ -92,7 +93,8 @@ class MigrationVerifier
                 }
 
                 $naturalKey = $this->resolveReferences($action['natural_key'], $execution);
-                if (($action['matched_by'] ?? 'natural_key') !== 'object_link'
+                if (($action['operation'] ?? null) !== 'relation'
+                    && ($action['matched_by'] ?? 'natural_key') !== 'object_link'
                     && ! $client->matchesNaturalKey($action['target_type'], $actual, $naturalKey)
                 ) {
                     $errors[] = [
@@ -103,7 +105,9 @@ class MigrationVerifier
                     continue;
                 }
 
-                if (in_array($result->status, [MigrationActionStatus::Created, MigrationActionStatus::Updated], true)) {
+                if (($action['operation'] ?? null) === 'relation'
+                    || in_array($result->status, [MigrationActionStatus::Created, MigrationActionStatus::Updated], true)
+                ) {
                     $expected = $this->resolveReferences($action['payload'], $execution);
                     $differences = $this->differences($expected, $actual);
                     if ($differences !== []) {
@@ -212,30 +216,6 @@ class MigrationVerifier
 
     private function differences(array $expected, array $actual): array
     {
-        $differences = [];
-        foreach ($expected as $field => $value) {
-            $actualValue = $actual[$field] ?? null;
-            if (is_array($actualValue) && array_key_exists('value', $actualValue)) {
-                $actualValue = $actualValue['value'];
-            } elseif (is_array($actualValue) && array_key_exists('id', $actualValue)) {
-                $actualValue = $actualValue['id'];
-            }
-
-            if ($field === 'custom_fields' && is_array($value)) {
-                foreach ($value as $customField => $customValue) {
-                    $current = $actual['custom_fields'][$customField] ?? null;
-                    if (is_array($current) && array_key_exists('value', $current)) {
-                        $current = $current['value'];
-                    }
-                    if ($current !== $customValue) {
-                        $differences["custom_fields.{$customField}"] = ['expected' => $customValue, 'actual' => $current];
-                    }
-                }
-            } elseif ($actualValue !== $value) {
-                $differences[$field] = ['expected' => $value, 'actual' => $actualValue];
-            }
-        }
-
-        return $differences;
+        return $this->payloadComparator->differences($expected, $actual, true);
     }
 }

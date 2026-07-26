@@ -42,6 +42,12 @@ class PhpIpamClient
     public function inventory(): array
     {
         $capabilities = $this->inspect();
+        if (is_string($capabilities['version'] ?? null)
+            && $capabilities['version'] !== ''
+            && ! (new CompatibilityMatrix)->phpIpam($capabilities['version'])
+        ) {
+            throw new ExternalApiException('phpIPAM', 'checking supported version 1.5 through 1.8');
+        }
         $warnings = [];
         $required = [
             'sections' => 'sections/',
@@ -53,6 +59,7 @@ class PhpIpamClient
             'devices' => 'devices/all/',
         ];
         $optional = [
+            'customers' => 'tools/customers/',
             'locations' => 'tools/locations/',
             'racks' => 'tools/racks/',
             'tags' => 'tools/tags/',
@@ -60,6 +67,8 @@ class PhpIpamClient
             'device_types' => 'tools/device_types/',
             'nameservers' => 'tools/nameservers/',
             'scan_agents' => 'tools/scanagents/',
+            'circuit_providers' => 'circuits/providers/',
+            'circuits' => 'circuits/',
         ];
         $objects = [];
 
@@ -70,6 +79,10 @@ class PhpIpamClient
         foreach ($optional as $key => $path) {
             $objects[$key] = $this->optionalGet($path, "discovering {$key}", $warnings);
         }
+        $objects['circuit_types'] = [];
+        $warnings[] = 'Circuit Type definitions are available only from an approved SQL dump; the official phpIPAM API exposes circuits and providers but no Circuit Type collection.';
+        $objects['routing_bgp'] = [];
+        $warnings[] = 'BGP sessions are available only from an approved SQL dump and are preserved; the public phpIPAM API exposes no stable cross-version session controller.';
 
         $customFields = [];
         foreach ([

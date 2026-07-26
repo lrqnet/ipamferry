@@ -75,12 +75,21 @@ class BundleLocalizationTest extends TestCase
         $manifest = json_decode((string) $zip->getFromName('manifest.json'), true, 512, JSON_THROW_ON_ERROR);
         $report = json_decode((string) $zip->getFromName('report.json'), true, 512, JSON_THROW_ON_ERROR);
         $planJson = json_decode((string) $zip->getFromName('plan.json'), true, 512, JSON_THROW_ON_ERROR);
+        $coverage = json_decode((string) $zip->getFromName('coverage.json'), true, 512, JSON_THROW_ON_ERROR);
+        $references = json_decode((string) $zip->getFromName('proposed-references.json'), true, 512, JSON_THROW_ON_ERROR);
+        $decisions = json_decode((string) $zip->getFromName('preservation-decisions.json'), true, 512, JSON_THROW_ON_ERROR);
         $zip->close();
 
+        self::assertSame(2, $manifest['schema_version']);
+        self::assertSame(1, $manifest['mapping_schema_version']);
+        self::assertSame(1, $manifest['plan_schema_version']);
         self::assertSame('pt_BR', $manifest['locale']);
         self::assertSame('Relatório de migração do IpamFerry', $report['title']);
         self::assertSame(1, $report['preservation']['categories']['unmigrated']);
         self::assertSame('create', $planJson['actions'][0]['operation']);
+        self::assertSame(1, $coverage['operations']['create']);
+        self::assertSame(1, $references['schema_version']);
+        self::assertSame(1, $decisions['schema_version']);
     }
 
     public function test_changing_artifact_locale_produces_a_distinct_immutable_plan(): void

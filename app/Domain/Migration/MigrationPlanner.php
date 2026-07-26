@@ -2,6 +2,11 @@
 
 namespace App\Domain\Migration;
 
+use App\Domain\Migration\Planners\CircuitsPlanner;
+use App\Domain\Migration\Planners\DcimPlanner;
+use App\Domain\Migration\Planners\IpamPlanner;
+use App\Domain\Migration\Planners\RelationsPlanner;
+use App\Domain\Migration\Planners\TenancyPlanner;
 use Illuminate\Support\Str;
 
 class MigrationPlanner
@@ -25,6 +30,19 @@ class MigrationPlanner
     private array $target;
 
     private MappingPolicy $policy;
+
+    private ResourceRegistry $resources;
+
+    public function __construct(
+        private readonly ?TenancyPlanner $tenancyPlanner = null,
+        private readonly ?DcimPlanner $dcimPlanner = null,
+        private readonly ?CircuitsPlanner $circuitsPlanner = null,
+        private readonly ?IpamPlanner $ipamPlanner = null,
+        private readonly ?RelationsPlanner $relationsPlanner = null,
+        ?ResourceRegistry $resources = null,
+    ) {
+        $this->resources = $resources ?? new ResourceRegistry;
+    }
 
     public function plan(array $source, array $target, array $mapping = [], array $identityLinks = []): array
     {
@@ -51,16 +69,36 @@ class MigrationPlanner
 
         $objects = $source['objects'] ?? $source;
         $this->planCustomFields();
-        $this->planVrfs($objects['vrfs'] ?? []);
-        $this->planVlanGroups($objects['vlan_groups'] ?? []);
-        $this->planVlans($objects['vlans'] ?? []);
-        $this->planPrefixes($objects['prefixes'] ?? []);
-        $this->planIpAddresses($objects['ip_addresses'] ?? []);
+        if ($this->policy->schemaVersion() === 1) {
+            $this->planVrfs($objects['vrfs'] ?? []);
+            $this->planVlanGroups($objects['vlan_groups'] ?? []);
+            $this->planVlans($objects['vlans'] ?? []);
+            $this->planPrefixes($objects['prefixes'] ?? []);
+            $this->planIpAddresses($objects['ip_addresses'] ?? []);
+        } else {
+            $tenancy = $this->tenancyPlanner ?? new TenancyPlanner;
+            $dcim = $this->dcimPlanner ?? new DcimPlanner;
+            $circuits = $this->circuitsPlanner ?? new CircuitsPlanner;
+            $ipam = $this->ipamPlanner ?? new IpamPlanner;
+            $relations = $this->relationsPlanner ?? new RelationsPlanner;
+            foreach ([
+                ...$tenancy->intents($objects, $this->policy),
+                ...$dcim->intents($objects, $this->policy),
+                ...$circuits->intents($objects, $this->policy),
+                ...$ipam->intents($objects, $this->policy),
+            ] as $intent) {
+                $this->consumeIntent($intent);
+            }
+            foreach ($relations->relations($objects, $this->policy) as $relation) {
+                $this->consumeRelation($relation);
+            }
+        }
         $this->detectExistingTargetConflicts();
         $this->detectDuplicateClaims();
         $this->sortActions();
 
         $preservation = [
+            'decisions' => $this->policy->preservationRules(),
             'unmigrated' => $source['preserved'] ?? [],
             'custom_field_definitions' => $source['custom_fields'] ?? [],
             'source_records' => $this->sourceRecords($objects),
@@ -71,11 +109,161 @@ class MigrationPlanner
         ];
 
         return [
+            ...($this->policy->schemaVersion() === 2 ? ['schema_version' => 3] : []),
             'actions' => array_values($this->actions),
             'conflicts' => array_values($this->conflicts),
             'warnings' => array_values(array_unique($this->warnings)),
             'preservation' => $preservation,
         ];
+    }
+
+    private function consumeIntent(array $intent): void
+    {
+        if (isset($intent['issue']) && is_array($intent['issue'])) {
+            $this->recordPlanningIssue($intent['issue']);
+
+            return;
+        }
+        $targetType = (string) ($intent['targetType'] ?? '');
+        $source = is_array($intent['source'] ?? null) ? $intent['source'] : [];
+        if ($targetType === '' || $source === []) {
+            $this->conflicts[] = ['reason' => 'invalid_planner_intent'];
+
+            return;
+        }
+        $sourceType = (string) ($source['source_type'] ?? $targetType);
+        if (! str_starts_with($sourceType, 'mapping_') && ! $this->policy->migrates($sourceType)) {
+            $this->addIgnoredAction(
+                $targetType,
+                $source,
+                $this->policy->objectPolicy($sourceType) === 'ignore'
+                    ? "{$sourceType} was explicitly ignored by the mapping."
+                    : "{$sourceType} is preserved until its object policy is approved.",
+            );
+
+            return;
+        }
+
+        $dependencies = [];
+        $naturalKey = $this->resolveIntentReferences($intent['naturalKey'] ?? [], $dependencies);
+        $payload = $this->resolveIntentReferences($intent['payload'] ?? [], $dependencies);
+        $fieldResult = $this->policy->fieldResult($sourceType, [
+            ...($source['legacy'] ?? []),
+            ...$source,
+        ]);
+        foreach ($fieldResult['errors'] as $error) {
+            $this->conflicts[] = [
+                'reason' => 'invalid_field_value',
+                'source_type' => $sourceType,
+                'source_id' => $source['source_id'] ?? null,
+                ...$error,
+            ];
+        }
+        if (is_array($payload)) {
+            $payload = array_replace($payload, $fieldResult['data']);
+        }
+        $customFields = $this->customFields($sourceType, $source);
+        if ($customFields !== []) {
+            $payload['custom_fields'] = $customFields;
+            array_push($dependencies, ...$this->customFieldDependencies($sourceType));
+        }
+        $this->addAction(
+            $targetType,
+            $source,
+            is_array($naturalKey) ? $naturalKey : [],
+            is_array($payload) ? $payload : [],
+            array_values(array_unique($dependencies)),
+            (bool) ($intent['createApproved'] ?? true),
+        );
+    }
+
+    private function consumeRelation(array $relation): void
+    {
+        if (isset($relation['issue']) && is_array($relation['issue'])) {
+            $this->recordPlanningIssue($relation['issue']);
+
+            return;
+        }
+        $source = is_array($relation['source'] ?? null) ? $relation['source'] : [];
+        $subjectType = (string) ($relation['subject_type'] ?? '');
+        $subjectSourceId = (string) ($relation['subject_source_id'] ?? '');
+        $subjectAction = $this->sourceActions[$subjectType][$subjectSourceId] ?? null;
+        if ($subjectAction === null || ($this->actions[$subjectAction]['operation'] ?? null) === 'ignore') {
+            $this->conflicts[] = [
+                'reason' => 'missing_relation_subject',
+                'relation' => $relation['relation'] ?? null,
+                'source_type' => $source['source_type'] ?? null,
+                'source_id' => $source['source_id'] ?? null,
+                'subject_type' => $subjectType,
+                'subject_source_id' => $subjectSourceId,
+            ];
+
+            return;
+        }
+        $dependencies = [$subjectAction];
+        $payload = $this->resolveIntentReferences($relation['payload'] ?? [], $dependencies);
+        $actionKey = CanonicalJson::fingerprint([
+            'relation' => $relation['relation'] ?? null,
+            'source_type' => $source['source_type'] ?? null,
+            'source_id' => $source['source_id'] ?? null,
+            'subject_action' => $subjectAction,
+            'payload' => $payload,
+        ]);
+        $this->actions[$actionKey] = [
+            'action_key' => $actionKey,
+            'operation' => 'relation',
+            'relation' => $relation['relation'] ?? null,
+            'source_type' => $source['source_type'] ?? 'relation',
+            'source_id' => (string) ($source['source_id'] ?? $actionKey),
+            'source_hash' => $source['source_hash'] ?? null,
+            'target_type' => $subjectType,
+            'subject_ref' => ['$ref' => $subjectAction],
+            'natural_key' => [],
+            'payload' => is_array($payload) ? $payload : [],
+            'payload_hash' => CanonicalJson::fingerprint($payload),
+            'dependencies' => array_values(array_unique($dependencies)),
+            'target_id' => null,
+            'differences' => [],
+        ];
+    }
+
+    private function resolveIntentReferences(mixed $value, array &$dependencies): mixed
+    {
+        if (! is_array($value)) {
+            return $value;
+        }
+        if (isset($value['$source_ref']) && is_array($value['$source_ref'])) {
+            $reference = $this->reference(
+                (string) ($value['$source_ref']['target_type'] ?? ''),
+                isset($value['$source_ref']['source_id']) ? (string) $value['$source_ref']['source_id'] : null,
+            );
+            array_push($dependencies, ...$this->dependencies($reference));
+
+            return $reference;
+        }
+        $resolved = [];
+        foreach ($value as $key => $item) {
+            $resolved[$key] = $this->resolveIntentReferences($item, $dependencies);
+        }
+
+        return $resolved;
+    }
+
+    private function recordPlanningIssue(array $issue): void
+    {
+        $warningReasons = [
+            'prefix_folder_preserved',
+            'device_ip_without_port',
+            'pat_preserved',
+            'nat_confirmation_required',
+            'primary_ip_ambiguous',
+        ];
+        if (in_array($issue['reason'] ?? null, $warningReasons, true)) {
+            $this->warnings[] = CanonicalJson::encode($issue);
+
+            return;
+        }
+        $this->conflicts[] = $issue;
     }
 
     private function planVrfs(array $objects): void
@@ -206,6 +394,7 @@ class MigrationPlanner
         array $naturalKey,
         array $payload,
         array $dependencies = [],
+        bool $createApproved = true,
     ): void {
         $sourceId = (string) ($source['source_id'] ?? '');
         if ($sourceId === '' || $this->naturalKeyIsIncomplete($naturalKey)) {
@@ -289,6 +478,17 @@ class MigrationPlanner
 
                 return;
             }
+            if ($matches === [] && ! $createApproved) {
+                $this->conflicts[] = [
+                    'reason' => 'auxiliary_creation_unapproved',
+                    'source_type' => $source['source_type'] ?? $targetType,
+                    'source_id' => $sourceId,
+                    'target_type' => $targetType,
+                    'natural_key' => $naturalKey,
+                ];
+
+                return;
+            }
             $operation = $matches === [] ? 'create' : 'reuse';
         }
 
@@ -331,6 +531,15 @@ class MigrationPlanner
     private function planCustomFields(): void
     {
         $objectTypes = [
+            'customer' => 'tenancy.tenant',
+            'tag' => 'extras.tag',
+            'location' => 'dcim.location',
+            'rack' => 'dcim.rack',
+            'device' => 'dcim.device',
+            'interface' => 'dcim.interface',
+            'provider' => 'circuits.provider',
+            'circuit' => 'circuits.circuit',
+            'asn' => 'ipam.asn',
             'vrf' => 'ipam.vrf',
             'vlan_group' => 'ipam.vlangroup',
             'vlan' => 'ipam.vlan',
@@ -485,6 +694,15 @@ class MigrationPlanner
 
             return ['$missing' => "{$targetType}:{$sourceId}"];
         }
+        if (($this->actions[$actionKey]['operation'] ?? null) === 'ignore') {
+            $this->conflicts[] = [
+                'reason' => 'preserved_dependency',
+                'target_type' => $targetType,
+                'source_id' => $sourceId,
+            ];
+
+            return ['$missing' => "{$targetType}:{$sourceId}"];
+        }
 
         $targetId = $this->actions[$actionKey]['target_id'] ?? null;
 
@@ -507,6 +725,31 @@ class MigrationPlanner
 
         return array_values(array_filter($collection, function (array $target) use ($targetType, $naturalKey, $relatedId): bool {
             return match ($targetType) {
+                'tenant', 'site', 'manufacturer', 'device_role', 'provider', 'circuit_type', 'rir', 'tag', 'contact_role' => (string) ($target['slug'] ?? '') === (string) ($naturalKey['slug'] ?? ''),
+                'device_type' => (string) ($target['slug'] ?? '') === (string) ($naturalKey['slug'] ?? '')
+                    && $relatedId($target['manufacturer'] ?? null) === ($naturalKey['manufacturer_id'] ?? null),
+                'contact' => (string) ($target['name'] ?? '') === (string) ($naturalKey['name'] ?? '')
+                    && (string) ($target['email'] ?? '') === (string) ($naturalKey['email'] ?? ''),
+                'contact_assignment' => (string) ($target['object_type'] ?? '') === (string) ($naturalKey['object_type'] ?? '')
+                    && $relatedId($target['object'] ?? $target['object_id'] ?? null) === ($naturalKey['object_id'] ?? null)
+                    && $relatedId($target['contact'] ?? null) === ($naturalKey['contact_id'] ?? null)
+                    && $relatedId($target['role'] ?? null) === ($naturalKey['role_id'] ?? null),
+                'location' => (string) ($target['slug'] ?? '') === (string) ($naturalKey['slug'] ?? '')
+                    && $relatedId($target['site'] ?? null) === ($naturalKey['site_id'] ?? null)
+                    && $relatedId($target['parent'] ?? null) === ($naturalKey['parent_id'] ?? null),
+                'rack' => mb_strtolower((string) ($target['name'] ?? '')) === mb_strtolower((string) ($naturalKey['name'] ?? ''))
+                    && $relatedId($target['site'] ?? null) === ($naturalKey['site_id'] ?? null)
+                    && $relatedId($target['location'] ?? null) === ($naturalKey['location_id'] ?? null),
+                'device' => mb_strtolower((string) ($target['name'] ?? '')) === mb_strtolower((string) ($naturalKey['name'] ?? ''))
+                    && $relatedId($target['site'] ?? null) === ($naturalKey['site_id'] ?? null),
+                'interface' => (string) ($target['name'] ?? '') === (string) ($naturalKey['name'] ?? '')
+                    && $relatedId($target['device'] ?? null) === ($naturalKey['device_id'] ?? null),
+                'mac_address' => strtoupper((string) ($target['mac_address'] ?? '')) === strtoupper((string) ($naturalKey['mac_address'] ?? '')),
+                'circuit' => (string) ($target['cid'] ?? '') === (string) ($naturalKey['cid'] ?? '')
+                    && $relatedId($target['provider'] ?? null) === ($naturalKey['provider_id'] ?? null),
+                'circuit_termination' => $relatedId($target['circuit'] ?? null) === ($naturalKey['circuit_id'] ?? null)
+                    && (string) ($target['term_side']['value'] ?? $target['term_side'] ?? '') === (string) ($naturalKey['term_side'] ?? ''),
+                'asn' => (int) ($target['asn'] ?? 0) === (int) ($naturalKey['asn'] ?? -1),
                 'vrf' => ($naturalKey['rd'] ?? null)
                     ? (string) ($target['rd'] ?? '') === (string) $naturalKey['rd']
                     : mb_strtolower((string) ($target['name'] ?? '')) === mb_strtolower((string) $naturalKey['name']),
@@ -526,15 +769,13 @@ class MigrationPlanner
 
     private function targetCollection(string $targetType): array
     {
-        return match ($targetType) {
-            'vrf' => $this->target['vrfs'] ?? [],
-            'vlan_group' => $this->target['vlan_groups'] ?? [],
-            'vlan' => $this->target['vlans'] ?? [],
-            'prefix' => $this->target['prefixes'] ?? [],
-            'ip_address' => $this->target['ip_addresses'] ?? [],
-            'custom_field' => $this->target['custom_fields'] ?? [],
-            default => [],
-        };
+        try {
+            $collection = $this->resources->collection($targetType);
+        } catch (\InvalidArgumentException) {
+            return [];
+        }
+
+        return is_array($this->target[$collection] ?? null) ? $this->target[$collection] : [];
     }
 
     private function linkKey(string $sourceType, string $sourceId): string
@@ -658,8 +899,8 @@ class MigrationPlanner
     private function sourceRecords(array $objects): array
     {
         $records = [];
-        foreach (['vrfs', 'vlan_groups', 'vlans', 'prefixes', 'ip_addresses'] as $type) {
-            foreach ($objects[$type] ?? [] as $object) {
+        foreach ($objects as $type => $items) {
+            foreach (is_array($items) ? $items : [] as $object) {
                 if (! is_array($object)) {
                     continue;
                 }
@@ -909,10 +1150,10 @@ class MigrationPlanner
     private function naturalKeyIsIncomplete(array $key): bool
     {
         foreach ($key as $field => $value) {
-            if ($value === null && in_array($field, ['prefix', 'address', 'vid', 'name'], true)) {
+            if ($value === null && in_array($field, ['prefix', 'address', 'vid', 'name', 'slug', 'cid', 'asn', 'mac_address'], true)) {
                 return true;
             }
-            if ($value === '' && in_array($field, ['prefix', 'address', 'name'], true)) {
+            if ($value === '' && in_array($field, ['prefix', 'address', 'name', 'slug', 'cid', 'mac_address'], true)) {
                 return true;
             }
         }
@@ -994,9 +1235,7 @@ class MigrationPlanner
 
     private function typeOrder(string $type): int
     {
-        $position = array_search($type, ['custom_field', 'vrf', 'vlan_group', 'vlan', 'prefix', 'ip_address'], true);
-
-        return $position === false ? PHP_INT_MAX : $position;
+        return $this->resources->phase($type);
     }
 
     private function prefixLength(?string $prefix): int

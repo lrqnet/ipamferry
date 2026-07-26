@@ -142,6 +142,7 @@ class SqlDumpParser
     public function toInventoryObjects(array $parsed): array
     {
         $mapped = [
+            'customers' => $parsed['customers'] ?? [],
             'sections' => $parsed['sections'] ?? [],
             'subnets' => $parsed['subnets'] ?? [],
             'addresses' => $parsed['ipaddresses'] ?? [],
@@ -156,31 +157,20 @@ class SqlDumpParser
             'nat' => $parsed['nat'] ?? [],
             'nameservers' => $parsed['nameservers'] ?? [],
             'scan_agents' => $parsed['scanAgents'] ?? [],
+            'firewall_zones' => $parsed['firewallZones'] ?? [],
+            'firewall_zone_mappings' => $parsed['firewallZoneMapping'] ?? [],
+            'firewall_zone_subnets' => $parsed['firewallZoneSubnet'] ?? [],
+            'rack_contents' => $parsed['rackContents'] ?? [],
+            'pstn_prefixes' => $parsed['pstnPrefixes'] ?? [],
+            'pstn_numbers' => $parsed['pstnNumbers'] ?? [],
+            'circuit_providers' => $parsed['circuitProviders'] ?? [],
+            'circuit_types' => $parsed['circuitTypes'] ?? [],
+            'circuits' => $parsed['circuits'] ?? [],
+            'logical_circuits' => $parsed['circuitsLogical'] ?? [],
+            'logical_circuit_mappings' => $parsed['circuitsLogicalMapping'] ?? [],
+            'routing_bgp' => $parsed['routing_bgp'] ?? [],
+            'routing_subnets' => $parsed['routing_subnets'] ?? [],
         ];
-
-        foreach (self::DATA_TABLES as $table) {
-            if (in_array($table, [
-                'sections',
-                'subnets',
-                'ipaddresses',
-                'vlans',
-                'vrf',
-                'vlanDomains',
-                'devices',
-                'locations',
-                'racks',
-                'deviceTypes',
-                'ipTags',
-                'nat',
-                'nameservers',
-                'scanAgents',
-            ], true)) {
-                continue;
-            }
-            if (($parsed[$table] ?? []) !== []) {
-                $mapped["preserved_{$table}"] = $parsed[$table];
-            }
-        }
 
         return $mapped;
     }

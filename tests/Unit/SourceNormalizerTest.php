@@ -3,6 +3,7 @@
 namespace Tests\Unit;
 
 use App\Domain\Migration\SourceNormalizer;
+use App\Domain\Migration\SqlDumpParser;
 use Tests\TestCase;
 
 class SourceNormalizerTest extends TestCase
@@ -37,7 +38,7 @@ class SourceNormalizerTest extends TestCase
         self::assertSame('7', $normalized['objects']['ip_addresses'][0]['vrf_source_id']);
     }
 
-    public function test_it_preserves_unsupported_objects_without_secret_like_fields(): void
+    public function test_it_normalizes_supported_devices_without_secret_like_fields(): void
     {
         $normalized = (new SourceNormalizer)->normalize(['objects' => [
             'devices' => [[
@@ -49,13 +50,68 @@ class SourceNormalizerTest extends TestCase
                 'description' => 'Edge router',
             ]],
         ]]);
-        $device = $normalized['preserved']['devices'][0];
+        $device = $normalized['objects']['devices'][0];
 
-        self::assertSame('router.example.test', $device['hostname']);
+        self::assertSame('router.example.test', $device['name']);
         self::assertSame('Edge router', $device['description']);
-        self::assertArrayNotHasKey('snmp_community', $device);
-        self::assertArrayNotHasKey('snmp_v3_auth_pass', $device);
-        self::assertArrayNotHasKey('api_key', $device);
+        self::assertArrayNotHasKey('snmp_community', $device['legacy']);
+        self::assertArrayNotHasKey('snmp_v3_auth_pass', $device['legacy']);
+        self::assertArrayNotHasKey('api_key', $device['legacy']);
         self::assertStringNotContainsString('private-', json_encode($normalized, JSON_THROW_ON_ERROR));
+    }
+
+    public function test_it_derives_interfaces_valid_macs_and_preserves_portless_assignments(): void
+    {
+        $normalized = (new SourceNormalizer)->normalize(['objects' => [
+            'devices' => [['id' => '1', 'hostname' => 'edge-01', 'type' => '10']],
+            'subnets' => [['id' => '20', 'subnet' => '167772160', 'mask' => '24']],
+            'addresses' => [
+                ['id' => '30', 'subnetId' => '20', 'ip_addr' => '167772161', 'switch' => '1', 'port' => 'eth0', 'mac' => 'aa-bb-cc-dd-ee-ff'],
+                ['id' => '31', 'subnetId' => '20', 'ip_addr' => '167772162', 'switch' => '1', 'port' => '', 'mac' => 'invalid'],
+                ['id' => '32', 'subnetId' => '20', 'ip_addr' => '167772163', 'switch' => '1', 'port' => 'eth0', 'mac' => 'aa-bb-cc-dd-ee-ff'],
+            ],
+        ]]);
+
+        self::assertCount(1, $normalized['objects']['interfaces']);
+        self::assertCount(1, $normalized['objects']['mac_addresses']);
+        self::assertSame('1:eth0', $normalized['objects']['interfaces'][0]['source_id']);
+        self::assertSame('AA:BB:CC:DD:EE:FF', $normalized['objects']['mac_addresses'][0]['mac_address']);
+        self::assertSame('1:eth0', $normalized['objects']['ip_addresses'][0]['interface_source_id']);
+        self::assertNull($normalized['objects']['ip_addresses'][1]['interface_source_id']);
+        self::assertSame('interface_missing', $normalized['preserved']['invalid_mac_addresses'][0]['reason']);
+        self::assertStringContainsString('has no device port', implode("\n", $normalized['warnings']));
+    }
+
+    public function test_expanded_e2e_fixture_covers_every_supported_migration_domain(): void
+    {
+        $parser = new SqlDumpParser;
+        $parsed = $parser->parseFile(base_path('tests/Fixtures/phpipam-expanded.sql'));
+        $normalized = (new SourceNormalizer)->normalize([
+            'objects' => $parser->toInventoryObjects($parsed),
+        ]);
+        $objects = $normalized['objects'];
+
+        foreach ([
+            'customers',
+            'locations',
+            'racks',
+            'device_roles',
+            'devices',
+            'interfaces',
+            'mac_addresses',
+            'providers',
+            'circuit_types',
+            'circuits',
+            'asns',
+            'prefixes',
+            'ip_addresses',
+            'nat_relations',
+        ] as $type) {
+            self::assertNotEmpty($objects[$type], "Expanded fixture must include {$type}.");
+        }
+        self::assertSame('1:eth0', $objects['interfaces'][0]['source_id']);
+        self::assertSame('101', $objects['nat_relations'][0]['inside_ip_source_id']);
+        self::assertSame('102', $objects['nat_relations'][0]['outside_ip_source_id']);
+        self::assertArrayHasKey('bgp_sessions', $normalized['preserved']);
     }
 }

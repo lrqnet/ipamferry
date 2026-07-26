@@ -34,8 +34,8 @@ final class SandboxConnection
                 $response = Http::acceptJson()
                     ->withToken($credentials['token'])
                     ->withoutRedirecting()
-                    ->connectTimeout(1)
-                    ->timeout(2)
+                    ->connectTimeout(2)
+                    ->timeout(max(2, min(30, (int) config('ipamferry.sandbox_probe_timeout_seconds'))))
                     ->get(rtrim($credentials['url'], '/').'/api/status/');
 
                 return $response->successful();

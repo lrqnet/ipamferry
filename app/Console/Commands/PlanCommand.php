@@ -5,7 +5,9 @@ namespace App\Console\Commands;
 use App\Domain\Migration\MigrationAudit;
 use App\Domain\Migration\MigrationOperationLock;
 use App\Domain\Migration\MigrationPlanner;
+use App\Enums\MigrationProjectStatus;
 use App\Jobs\BuildMigrationPlan;
+use DomainException;
 use Throwable;
 
 class PlanCommand extends ProjectMigrationCommand
@@ -18,6 +20,9 @@ class PlanCommand extends ProjectMigrationCommand
     {
         try {
             $project = $this->project();
+            if ($project->status === MigrationProjectStatus::Verified) {
+                throw new DomainException('Refresh the NetBox target before generating a sibling plan.');
+            }
             (new BuildMigrationPlan($project->id))->handle(
                 $planner,
                 app(MigrationAudit::class),
