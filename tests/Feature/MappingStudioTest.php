@@ -88,6 +88,35 @@ class MappingStudioTest extends TestCase
         $this->post(route('projects.mapping.preview', $project))->assertForbidden();
     }
 
+    public function test_artifact_language_is_managed_outside_mapping_studio(): void
+    {
+        [$user, $project] = $this->project();
+        $project->update([
+            'source_snapshot' => ['objects' => []],
+            'status' => MigrationProjectStatus::Planned,
+        ]);
+
+        $this->actingAs($user)
+            ->put(route('projects.artifact-locale.update', $project), ['locale' => 'en'])
+            ->assertRedirect();
+        self::assertSame(MigrationProjectStatus::Planned, $project->refresh()->status);
+
+        $this->actingAs($user)
+            ->put(route('projects.artifact-locale.update', $project), ['locale' => 'pt_BR'])
+            ->assertRedirect();
+
+        $project->refresh();
+        self::assertSame('pt_BR', $project->locale);
+        self::assertSame(MigrationProjectStatus::Discovered, $project->status);
+
+        $this->put(route('projects.artifact-locale.update', $project), ['locale' => 'invalid'])
+            ->assertSessionHasErrors('locale');
+
+        $user->update(['role' => UserRole::Reader]);
+        $this->put(route('projects.artifact-locale.update', $project), ['locale' => 'es'])
+            ->assertForbidden();
+    }
+
     public function test_preview_is_queued_and_bound_to_the_current_revision(): void
     {
         Queue::fake();

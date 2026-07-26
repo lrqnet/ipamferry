@@ -64,6 +64,7 @@ test("claims an installation and migrates baseline and expanded inventories", as
   await expect(
     page.getByRole("heading", { name: "Mapping Studio" }),
   ).toBeVisible();
+  await expect(page.locator("#artifact-locale")).toHaveCount(0);
   await page.getByRole("button", { name: "Objects" }).click();
   await expect(
     page.getByRole("heading", { name: "Object policies" }),

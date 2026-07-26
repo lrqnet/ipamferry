@@ -27,6 +27,8 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
 
 ### Fixed
 
+- O Mapping Studio mantém apenas o seletor global de idioma da interface; o
+  idioma de relatórios e bundles fica identificado separadamente no projeto.
 - Verificação canonicaliza campos REST de escrita/representação e números
   decimais equivalentes retornados pelo NetBox.
 - MACs inválidos ou sem porta são preservados com motivo e repetições válidas

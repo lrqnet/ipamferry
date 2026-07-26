@@ -350,6 +350,37 @@ export default function Show({
               {t("mapping.open")}
             </Link>
           </div>
+          <Form
+            action={`/projects/${project.id}/artifact-locale`}
+            method="put"
+            className="mt-5 rounded border border-slate-700 bg-slate-950/50 p-4"
+          >
+            <fieldset disabled={project.definition_locked}>
+              <label className="block text-sm" htmlFor="artifact-locale">
+                {t("projects.locale")}
+              </label>
+              <p className="mt-1 text-xs text-slate-400">
+                {t("show.artifact_locale_help")}
+              </p>
+              <div className="mt-3 flex flex-wrap items-end gap-3">
+                <select
+                  id="artifact-locale"
+                  name="locale"
+                  defaultValue={project.locale}
+                  className="min-w-56 rounded border border-slate-700 bg-slate-800 px-3 py-2 text-sm"
+                >
+                  {page.props.availableLocales?.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <button className="rounded border border-sky-400 px-4 py-2 text-sm text-sky-300 disabled:opacity-50">
+                  {t("show.save_artifact_locale")}
+                </button>
+              </div>
+            </fieldset>
+          </Form>
         </section>
 
         {project.has_source_snapshot && (

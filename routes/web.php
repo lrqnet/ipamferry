@@ -21,6 +21,7 @@ Route::middleware('auth')->group(function (): void {
     Route::post('/projects', [MigrationProjectController::class, 'store'])->middleware('role:owner,administrator,operator')->name('projects.store');
     Route::post('/projects/{project}/discover', [MigrationProjectController::class, 'discover'])->middleware(['role:owner,administrator,operator', 'throttle:migration-write'])->name('projects.discover');
     Route::post('/projects/{project}/discover-dump', [MigrationProjectController::class, 'discoverDump'])->middleware(['role:owner,administrator,operator', 'throttle:migration-write'])->name('projects.discover-dump');
+    Route::put('/projects/{project}/artifact-locale', [MigrationProjectController::class, 'updateArtifactLocale'])->middleware(['role:owner,administrator,operator', 'throttle:migration-write'])->name('projects.artifact-locale.update');
     Route::put('/projects/{project}/mapping', [MappingStudioController::class, 'update'])->middleware(['role:owner,administrator,operator', 'throttle:migration-write'])->name('projects.mapping.update');
     Route::post('/projects/{project}/mapping/preview', [MappingStudioController::class, 'preview'])->middleware(['role:owner,administrator,operator', 'throttle:migration-write'])->name('projects.mapping.preview');
     Route::get('/projects/{project}/mapping/previews/{preview}', [MappingStudioController::class, 'previewStatus'])->name('projects.mapping.previews.show');

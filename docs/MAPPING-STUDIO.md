@@ -21,6 +21,10 @@ ser aprovado nem aplicado e permanece vinculado aos fingerprints da origem,
 do destino e à revisão do mapeamento. Uma alteração posterior exige outro
 preview.
 
+O seletor no cabeçalho altera somente o idioma da interface. O idioma de
+relatórios, arquivos de preservação e do bundle é uma configuração separada,
+identificada na página do projeto, e não aparece dentro do Mapping Studio.
+
 ## Abas
 
 - **Visão geral** mostra revisão, schema, cobertura e sugestões determinísticas.

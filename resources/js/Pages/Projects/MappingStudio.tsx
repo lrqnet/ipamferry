@@ -1,4 +1,4 @@
-import { Link, router, usePage } from "@inertiajs/react";
+import { Link, router } from "@inertiajs/react";
 import axios from "axios";
 import {
   AlertTriangle,
@@ -21,7 +21,7 @@ import {
   useState,
 } from "react";
 import { PageShell } from "../../Components/PageShell";
-import { isLocaleCode, useI18n } from "../../i18n";
+import { useI18n } from "../../i18n";
 
 type Scalar = string | number | boolean | null;
 type JsonValue = Scalar | JsonValue[] | { [key: string]: JsonValue };
@@ -149,19 +149,12 @@ export default function MappingStudio({
   latestPreview?: Preview | null;
 }) {
   const { t } = useI18n();
-  const page = usePage<{
-    availableLocales?: { value: string; label: string }[];
-  }>();
   const [activeTab, setActiveTab] = useState<Tab>("overview");
   const [mapping, setMapping] = useState<Mapping>(() => clone(initialMapping));
   const [savedMapping, setSavedMapping] = useState<Mapping>(() =>
     clone(initialMapping),
   );
   const [revision, setRevision] = useState(project.mapping_revision);
-  const [locale, setLocale] = useState(
-    isLocaleCode(project.locale) ? project.locale : "en",
-  );
-  const [savedLocale, setSavedLocale] = useState(locale);
   const [jsonText, setJsonText] = useState(() =>
     JSON.stringify(initialMapping, null, 2),
   );
@@ -174,10 +167,8 @@ export default function MappingStudio({
   const [history, setHistory] = useState<Mapping[]>([clone(initialMapping)]);
   const [historyIndex, setHistoryIndex] = useState(0);
   const isDirty = useMemo(
-    () =>
-      JSON.stringify(mapping) !== JSON.stringify(savedMapping) ||
-      locale !== savedLocale,
-    [locale, mapping, savedLocale, savedMapping],
+    () => JSON.stringify(mapping) !== JSON.stringify(savedMapping),
+    [mapping, savedMapping],
   );
   const editable = project.can_edit && !project.definition_locked;
 
@@ -258,13 +249,12 @@ export default function MappingStudio({
         locale: string;
       }>(
         `/projects/${project.id}/mapping`,
-        { mapping, locale, revision },
+        { mapping, locale: project.locale, revision },
         { headers: { Accept: "application/json" } },
       );
       const persisted = clone(response.data.mapping);
       setMapping(persisted);
       setSavedMapping(persisted);
-      setSavedLocale(locale);
       setRevision(response.data.revision);
       setJsonText(JSON.stringify(persisted, null, 2));
       setJsonDirty(false);
@@ -376,25 +366,6 @@ export default function MappingStudio({
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <label className="sr-only" htmlFor="artifact-locale">
-              {t("projects.locale")}
-            </label>
-            <select
-              id="artifact-locale"
-              value={locale}
-              onChange={(event) =>
-                isLocaleCode(event.target.value) &&
-                setLocale(event.target.value)
-              }
-              disabled={!editable}
-              className="rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm disabled:opacity-40"
-            >
-              {page.props.availableLocales?.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
             <button
               type="button"
               onClick={undo}

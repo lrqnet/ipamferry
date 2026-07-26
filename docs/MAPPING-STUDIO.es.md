@@ -21,6 +21,10 @@ El preview usa el mismo planificador, pero es temporal, no aprobable y no
 aplicable. Queda vinculado a las huellas del origen y del destino y a la
 revisión del mapeo.
 
+El selector del encabezado cambia solo el idioma de la interfaz. Los informes,
+archivos de preservación y el bundle auditable usan una configuración separada
+y claramente identificada en la página del proyecto, fuera de Mapping Studio.
+
 ## Secciones
 
 - **Resumen** muestra revisión, schema, cobertura y sugerencias deterministas.

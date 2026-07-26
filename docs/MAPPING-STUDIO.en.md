@@ -20,6 +20,10 @@ Preview runs the same planner as an official plan, but is temporary,
 non-approvable, and non-applicable. It is bound to the source fingerprint,
 target fingerprint, and mapping revision.
 
+The header selector changes only the interface language. Reports, preservation
+files, and the audit bundle use a separate, clearly labeled project setting
+that is not shown inside Mapping Studio.
+
 ## Sections
 
 - **Overview** shows the revision, schema, coverage, and deterministic

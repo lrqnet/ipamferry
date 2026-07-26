@@ -125,6 +125,42 @@ class MigrationProjectController extends Controller
         ]);
     }
 
+    public function updateArtifactLocale(
+        Request $request,
+        MigrationProject $project,
+        MigrationAudit $audit,
+        MigrationOperationLock $operations,
+    ): RedirectResponse {
+        $data = $request->validate([
+            'locale' => ['required', 'in:'.implode(',', SupportedLocale::values())],
+        ]);
+
+        try {
+            $lock = $operations->acquire($project);
+            $operations->assertDefinitionMutable($project);
+            if ($project->locale === $data['locale']) {
+                return back()->with('success', 'Artifact language is already up to date.');
+            }
+            $project->update([
+                'locale' => $data['locale'],
+                'status' => $project->source_snapshot === null
+                    ? MigrationProjectStatus::Draft
+                    : MigrationProjectStatus::Discovered,
+            ]);
+            $audit->record($project, 'project.artifact_locale.updated', [
+                'locale' => $project->locale,
+            ], $request->user()->id);
+        } catch (Throwable $exception) {
+            return back()->withErrors(['migration' => $exception->getMessage()]);
+        } finally {
+            if (isset($lock)) {
+                $lock->release();
+            }
+        }
+
+        return back()->with('success', 'Artifact language updated. Generate a new plan to use it.');
+    }
+
     public function discover(
         Request $request,
         MigrationProject $project,

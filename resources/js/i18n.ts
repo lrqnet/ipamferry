@@ -66,7 +66,10 @@ export const resources = {
         "Run discovery to build the sanitized canonical inventory.",
       "show.mapping": "3. Mapping policy",
       "show.mapping_help":
-        "Choose the artifact language and edit the versioned, non-executable mapping policy.",
+        "Edit the versioned, non-executable mapping policy in Mapping Studio.",
+      "show.artifact_locale_help":
+        "Used only for reports, preservation files, and the audit bundle. It does not change the interface language.",
+      "show.save_artifact_locale": "Update artifact language",
       "show.mapping_json": "Mapping JSON",
       "show.save_mapping": "Save mapping",
       "show.plan_help":
@@ -473,7 +476,10 @@ export const resources = {
         "Execute a descoberta para criar o inventário canônico sanitizado.",
       "show.mapping": "3. Política de mapeamento",
       "show.mapping_help":
-        "Escolha o idioma dos artefatos e edite a política versionada, sem código executável.",
+        "Edite a política versionada, sem código executável, no Mapping Studio.",
+      "show.artifact_locale_help":
+        "Usado apenas nos relatórios, arquivos de preservação e bundle auditável. Não altera o idioma da interface.",
+      "show.save_artifact_locale": "Atualizar idioma dos artefatos",
       "show.mapping_json": "JSON de mapeamento",
       "show.save_mapping": "Salvar mapeamento",
       "show.plan_help":
@@ -891,7 +897,10 @@ export const resources = {
         "Ejecuta el descubrimiento para crear el inventario canónico saneado.",
       "show.mapping": "3. Política de mapeo",
       "show.mapping_help":
-        "Elige el idioma de los artefactos y edita la política versionada sin código ejecutable.",
+        "Edita la política versionada sin código ejecutable en Mapping Studio.",
+      "show.artifact_locale_help":
+        "Se usa solo para informes, archivos de preservación y el bundle auditable. No cambia el idioma de la interfaz.",
+      "show.save_artifact_locale": "Actualizar idioma de artefactos",
       "show.mapping_json": "JSON de mapeo",
       "show.save_mapping": "Guardar mapeo",
       "show.plan_help":
