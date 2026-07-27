@@ -424,6 +424,26 @@ class MigrationPlannerTest extends TestCase
         self::assertSame('NEW', $result['preservation']['source_records']['prefixes'][0]['legacy']['asset_code']);
     }
 
+    public function test_it_omits_orphaned_tag_references_when_no_tag_definition_exists(): void
+    {
+        $source = $this->source([
+            'prefixes' => [$this->object('prefix', 'prefix-a', [
+                'prefix' => '198.51.100.0/24',
+                'tag_source_id' => '2',
+            ])],
+        ]);
+        $mapping = MappingPolicy::v2Defaults();
+        $mapping['object_policies']['prefix'] = 'migrate';
+        $mapping['object_policies']['tag'] = 'migrate';
+
+        $result = (new MigrationPlanner)->plan($source, ['objects' => []], $mapping);
+        $prefix = collect($result['actions'])->firstWhere('target_type', 'prefix');
+
+        self::assertNotNull($prefix);
+        self::assertSame([], $result['conflicts']);
+        self::assertSame([], $prefix['payload']['tags']);
+    }
+
     private function source(array $objects): array
     {
         return ['objects' => [

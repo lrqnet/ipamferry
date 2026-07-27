@@ -82,6 +82,10 @@ final class IpamPlanner
         }
 
         $prefixes = $objects['prefixes'] ?? [];
+        // A phpIPAM record can retain a tag ID even when no tag definition is
+        // available through the selected adapter. Do not emit an unresolved
+        // NetBox reference for that orphaned value.
+        $hasSourceTags = ($objects['tags'] ?? []) !== [];
         usort($prefixes, fn (array $left, array $right): int => [
             $left['vrf_source_id'] ?? '',
             (int) substr(strrchr((string) ($left['prefix'] ?? ''), '/') ?: '/0', 1),
@@ -110,7 +114,9 @@ final class IpamPlanner
             $vrf = PlannerIntent::reference('vrf', $object['vrf_source_id'] ?? null);
             $vlan = PlannerIntent::reference('vlan', $object['vlan_source_id'] ?? null);
             $tenant = PlannerIntent::reference('tenant', $object['tenant_source_id'] ?? null);
-            $tag = $policy->migrates('tag') ? $this->tagReference($object['tag_source_id'] ?? null) : null;
+            $tag = $policy->migrates('tag') && $hasSourceTags
+                ? $this->tagReference($object['tag_source_id'] ?? null)
+                : null;
             $intents[] = PlannerIntent::object('prefix', $object, [
                 'prefix' => $object['prefix'] ?? null,
                 'vrf_id' => $vrf,
@@ -140,7 +146,9 @@ final class IpamPlanner
             $vrf = PlannerIntent::reference('vrf', $object['vrf_source_id'] ?? null);
             $tenant = PlannerIntent::reference('tenant', $object['tenant_source_id'] ?? null);
             $interface = PlannerIntent::reference('interface', $object['interface_source_id'] ?? null);
-            $tag = $policy->migrates('tag') ? $this->tagReference($object['tag_source_id'] ?? null) : null;
+            $tag = $policy->migrates('tag') && $hasSourceTags
+                ? $this->tagReference($object['tag_source_id'] ?? null)
+                : null;
             $dnsName = trim((string) ($object['dns_name'] ?? ''));
             if ($dnsName !== '' && ! $this->validDnsName($dnsName)) {
                 // Keep the IP address itself migratable. A malformed hostname
