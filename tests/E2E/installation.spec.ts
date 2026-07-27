@@ -228,9 +228,15 @@ test("claims an installation and migrates baseline and expanded inventories", as
     console.error(`Sibling plan diagnostics: ${await page.locator("main").textContent()}`);
   }
   expect(siblingPlanSummaryText).toMatch(/\d+ actions, 0 conflicts/);
-  await expect(
-    page.getByLabel("I reviewed the diff and approve this exact fingerprint"),
-  ).toBeVisible({ timeout: 30_000 });
+  const siblingApproval = page.getByLabel(
+    "I reviewed the diff and approve this exact fingerprint",
+  );
+  try {
+    await expect(siblingApproval).toBeVisible({ timeout: 30_000 });
+  } catch (error) {
+    console.error(`Sibling approval diagnostics: ${await page.locator("main").innerText()}`);
+    throw error;
+  }
   await page
     .getByLabel("I reviewed the diff and approve this exact fingerprint")
     .check();
