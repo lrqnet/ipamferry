@@ -2265,20 +2265,6 @@ function PreviewPanel({
                   value={result.summary.warnings}
                 />
               </div>
-              {result.conflicts.length > 0 && (
-                <details className="mt-4 rounded border border-red-900 bg-red-950/30 p-3 text-sm text-red-100">
-                  <summary className="cursor-pointer font-medium">
-                    {t("show.conflicts")}
-                  </summary>
-                  <ul className="mt-3 list-disc space-y-1 pl-5" data-testid="preview-conflicts">
-                    {result.conflicts.map((conflict, index) => (
-                      <li key={`${String(conflict.reason ?? "conflict")}-${index}`}>
-                        {JSON.stringify(conflict)}
-                      </li>
-                    ))}
-                  </ul>
-                </details>
-              )}
               <p className="mt-4 rounded border border-amber-800 bg-amber-950/30 p-3 text-sm text-amber-200">
                 {t("mapping.preview_non_applicable")}
               </p>

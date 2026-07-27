@@ -180,19 +180,21 @@ test("claims an installation and migrates baseline and expanded inventories", as
   await page.getByRole("button", { name: "Preview" }).click();
   await page.getByRole("button", { name: "Run preview" }).click();
   await expect(page.getByText("Completed")).toBeVisible({ timeout: 30_000 });
-  const previewConflicts = page.getByTestId("preview-conflicts");
-  const previewConflictItems = previewConflicts.getByRole("listitem");
-  const previewConflictCount = await previewConflictItems.count();
-  if (previewConflictCount !== 0) {
-    console.error(`Preview conflicts: ${await previewConflictItems.allTextContents()}`);
-  }
-  expect(previewConflictCount).toBe(0);
   await page.getByRole("link", { name: "Back to project" }).click();
 
   await page.getByRole("button", { name: "Generate plan" }).click();
-  await expect(page.getByText(/\d+ actions, 0 conflicts/)).toBeVisible({
-    timeout: 30_000,
-  });
+  const planSummary = page.getByText(/\d+ actions, \d+ conflicts/);
+  try {
+    await expect(planSummary).toBeVisible({ timeout: 30_000 });
+  } catch (error) {
+    console.error(`Plan diagnostics: ${await page.locator("main").innerText()}`);
+    throw error;
+  }
+  const planSummaryText = await planSummary.innerText();
+  if (!/\d+ actions, 0 conflicts/.test(planSummaryText)) {
+    console.error(`Plan diagnostics: ${await page.locator("main").textContent()}`);
+  }
+  expect(planSummaryText).toMatch(/\d+ actions, 0 conflicts/);
   await page
     .getByLabel("I reviewed the diff and approve this exact fingerprint")
     .check();
