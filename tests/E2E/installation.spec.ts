@@ -212,6 +212,7 @@ test("claims an installation and migrates baseline and expanded inventories", as
   );
   await expect(stalePlanNotice).toBeVisible({ timeout: 30_000 });
   await page.getByRole("button", { name: "Generate plan" }).click();
+  await expect(page.getByText("Plan queued.")).toBeVisible({ timeout: 30_000 });
   await expect(stalePlanNotice).not.toBeVisible({ timeout: 30_000 });
   const siblingPlanSummary = page.getByText(/\d+ actions, \d+ conflicts/);
   await expect(siblingPlanSummary).toBeVisible({ timeout: 30_000 });
