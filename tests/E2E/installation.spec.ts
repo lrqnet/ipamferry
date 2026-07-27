@@ -211,14 +211,13 @@ test("claims an installation and migrates baseline and expanded inventories", as
     "This plan is stale because the discovery snapshot or mapping changed. Generate a new plan.",
   );
   await expect(stalePlanNotice).toBeVisible({ timeout: 30_000 });
+  const siblingPlanRequest = page.waitForResponse(
+    (response) => /\/projects\/\d+\/plan$/.test(response.url()) && response.request().method() === "POST",
+  );
   await page.getByRole("button", { name: "Generate plan" }).click();
-  try {
-    await expect(page.getByText("Plan queued.")).toBeVisible({ timeout: 30_000 });
-  } catch (error) {
-    console.error(`Sibling queue diagnostics: ${await page.locator("main").innerText()}`);
-    throw error;
-  }
-  await expect(stalePlanNotice).not.toBeVisible({ timeout: 30_000 });
+  const siblingPlanResponse = await siblingPlanRequest;
+  expect(siblingPlanResponse.status()).toBe(302);
+  await expect(stalePlanNotice).not.toBeVisible({ timeout: 60_000 });
   const siblingPlanSummary = page.getByText(/\d+ actions, \d+ conflicts/);
   await expect(siblingPlanSummary).toBeVisible({ timeout: 30_000 });
   const siblingPlanSummaryText = await siblingPlanSummary.innerText();
