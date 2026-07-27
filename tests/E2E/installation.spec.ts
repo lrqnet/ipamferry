@@ -184,16 +184,8 @@ test("claims an installation and migrates baseline and expanded inventories", as
 
   await page.getByRole("button", { name: "Generate plan" }).click();
   const planSummary = page.getByText(/\d+ actions, \d+ conflicts/);
-  try {
-    await expect(planSummary).toBeVisible({ timeout: 30_000 });
-  } catch (error) {
-    console.error(`Plan diagnostics: ${await page.locator("main").innerText()}`);
-    throw error;
-  }
+  await expect(planSummary).toBeVisible({ timeout: 30_000 });
   const planSummaryText = await planSummary.innerText();
-  if (!/\d+ actions, 0 conflicts/.test(planSummaryText)) {
-    console.error(`Plan diagnostics: ${await page.locator("main").textContent()}`);
-  }
   expect(planSummaryText).toMatch(/\d+ actions, 0 conflicts/);
   await page
     .getByLabel("I reviewed the diff and approve this exact fingerprint")
@@ -216,27 +208,19 @@ test("claims an installation and migrates baseline and expanded inventories", as
     ),
   ).toBeVisible({ timeout: 180_000 });
   await page.getByRole("button", { name: "Generate plan" }).click();
+  await expect(
+    page.getByText(
+      "This plan is stale because the discovery snapshot or mapping changed. Generate a new plan.",
+    ),
+  ).not.toBeVisible({ timeout: 30_000 });
   const siblingPlanSummary = page.getByText(/\d+ actions, \d+ conflicts/);
-  try {
-    await expect(siblingPlanSummary).toBeVisible({ timeout: 30_000 });
-  } catch (error) {
-    console.error(`Sibling plan diagnostics: ${await page.locator("main").innerText()}`);
-    throw error;
-  }
+  await expect(siblingPlanSummary).toBeVisible({ timeout: 30_000 });
   const siblingPlanSummaryText = await siblingPlanSummary.innerText();
-  if (!/\d+ actions, 0 conflicts/.test(siblingPlanSummaryText)) {
-    console.error(`Sibling plan diagnostics: ${await page.locator("main").textContent()}`);
-  }
   expect(siblingPlanSummaryText).toMatch(/\d+ actions, 0 conflicts/);
   const siblingApproval = page.getByLabel(
     "I reviewed the diff and approve this exact fingerprint",
   );
-  try {
-    await expect(siblingApproval).toBeVisible({ timeout: 30_000 });
-  } catch (error) {
-    console.error(`Sibling approval diagnostics: ${await page.locator("main").innerText()}`);
-    throw error;
-  }
+  await expect(siblingApproval).toBeVisible({ timeout: 30_000 });
   await page
     .getByLabel("I reviewed the diff and approve this exact fingerprint")
     .check();
