@@ -233,6 +233,48 @@ class MigrationLifecycleTest extends TestCase
         }
     }
 
+    public function test_etag_drift_before_an_explicit_patch_blocks_apply_without_writing(): void
+    {
+        [$project, $plan, $user] = $this->plannedUpdateProject();
+        $patches = 0;
+        Http::fake(function (Request $request) use (&$patches) {
+            $path = (string) parse_url($request->url(), PHP_URL_PATH);
+            if ($path === '/api/status/') {
+                return Http::response(['netbox-version' => '4.5.3', 'plugins' => []], 200, ['API-Version' => '4.5']);
+            }
+            if ($path === '/api/ipam/vrfs/100/' && $request->method() === 'GET') {
+                return Http::response([
+                    'id' => 100,
+                    'name' => 'Blue',
+                    'rd' => '65000:1',
+                    'description' => 'Changed by another operator',
+                    'last_updated' => '2026-07-25T10:02:00Z',
+                ], 200, ['ETag' => '"new-version"']);
+            }
+            if ($path === '/api/ipam/vrfs/100/' && $request->method() === 'PATCH') {
+                $patches++;
+
+                return Http::response([], 412);
+            }
+
+            return Http::response(['results' => [], 'next' => null]);
+        });
+
+        $this->expectException(DomainException::class);
+        $this->expectExceptionMessage('changed after discovery');
+        try {
+            app(MigrationApplier::class)->apply(
+                $project,
+                $plan,
+                'https://netbox.example.test',
+                'nbt_test.runtime-token',
+                $user->id,
+            );
+        } finally {
+            self::assertSame(0, $patches);
+        }
+    }
+
     public function test_lost_update_response_is_recovered_without_a_second_patch(): void
     {
         [$project, $plan, $user] = $this->plannedUpdateProject();

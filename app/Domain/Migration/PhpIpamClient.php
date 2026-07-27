@@ -23,7 +23,23 @@ class PhpIpamClient
 
     public function inspect(): array
     {
-        $response = $this->send('OPTIONS', $this->rootPath(), [], 'checking API capabilities');
+        // phpIPAM exposes the controller catalogue at the application root.
+        // OPTIONS is documented, but some supported images/proxies reject it
+        // while accepting the equivalent authenticated GET. Discovery must not
+        // fail merely because an intermediary does not pass OPTIONS through.
+        try {
+            $response = $this->send('OPTIONS', $this->rootPath(), [], 'checking API capabilities');
+        } catch (ExternalApiException) {
+            try {
+                $response = $this->send('GET', $this->rootPath(), [], 'checking API capabilities');
+            } catch (ExternalApiException) {
+                // Older phpIPAM proxy/API combinations can reject requests to
+                // the application root altogether. A read of sections is an
+                // official required controller and also proves the token and
+                // API are usable for discovery.
+                $response = $this->send('GET', $this->rootPath().'sections/', [], 'checking API capabilities');
+            }
+        }
         $data = $response->json('data', []);
         $permissions = is_array($data) ? ($data['permissions'] ?? null) : null;
         $controllers = is_array($data) ? ($data['controllers'] ?? $data) : [];
@@ -143,9 +159,11 @@ class PhpIpamClient
         try {
             $response = $this->request()->send($method, $path, $options);
         } catch (ConnectionException) {
-            throw new ExternalApiException('phpIPAM', $operation);
-        } catch (Throwable) {
-            throw new ExternalApiException('phpIPAM', $operation);
+            throw new ExternalApiException('phpIPAM', "{$operation}: connection");
+        } catch (Throwable $exception) {
+            // Keep transport diagnostics useful without exposing request URLs,
+            // headers, tokens, or upstream response bodies.
+            throw new ExternalApiException('phpIPAM', "{$operation}: transport ".class_basename($exception));
         }
 
         if ($response->failed()) {
@@ -167,14 +185,19 @@ class PhpIpamClient
 
     private function request(): PendingRequest
     {
-        return Http::baseUrl(rtrim($this->url, '/').'/')
+        $request = Http::baseUrl(rtrim($this->url, '/').'/')
             ->acceptJson()
             ->asJson()
             ->withHeaders(['phpipam-token' => $this->token])
             ->withoutRedirecting()
             ->connectTimeout(5)
-            ->timeout(30)
-            ->retry(2, 250, fn (Throwable $exception) => $exception instanceof ConnectionException, false);
+            ->timeout(30);
+        $bundle = config('ipamferry.extra_ca_bundle');
+        if (is_string($bundle) && is_readable($bundle)) {
+            $request = $request->withOptions(['verify' => $bundle]);
+        }
+
+        return $request->retry(2, 250, fn (Throwable $exception) => $exception instanceof ConnectionException, false);
     }
 
     private function rootPath(): string

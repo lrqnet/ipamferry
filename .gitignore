@@ -6,6 +6,8 @@
 /.phpunit.result.cache
 /playwright-report
 /test-results
+/tmp/lab
+/tmp/lab-results
 /storage/*.key
 /storage/app/private/*
 !/storage/app/private/.gitignore

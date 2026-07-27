@@ -6,6 +6,7 @@
 - [Mapping Studio](MAPPING-STUDIO.md)
 - [Desarrollo](DEVELOPMENT.md)
 - [Operaciones y versiones](RELEASE.md)
+- [Validación de lanzamiento](VALIDATION.md)
 - [Plan histórico](PLAN.md)
 - [Decisiones de arquitectura](adr/)
 

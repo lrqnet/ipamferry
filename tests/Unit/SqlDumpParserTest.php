@@ -87,7 +87,8 @@ class SqlDumpParserTest extends TestCase
           `mask` varchar(3),
           `rack_code` varchar(32) NOT NULL,
           `legacy_weight` int NULL,
-          `api_secret` text
+          `api_secret` text,
+          `operator_permissions` text
         );
         SQL;
 
@@ -100,5 +101,6 @@ class SqlDumpParserTest extends TestCase
         self::assertFalse($catalog['prefix'][0]['nullable']);
         self::assertSame('integer', $catalog['prefix'][1]['data_type']);
         self::assertStringNotContainsString('api_secret', json_encode($catalog, JSON_THROW_ON_ERROR));
+        self::assertStringNotContainsString('operator_permissions', json_encode($catalog, JSON_THROW_ON_ERROR));
     }
 }

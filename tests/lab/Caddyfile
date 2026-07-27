@@ -1,0 +1,6 @@
+https://phpipam-proxy:8443 {
+    tls internal
+    reverse_proxy phpipam-web:80 {
+        header_up X-Forwarded-Proto https
+    }
+}

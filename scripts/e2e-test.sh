@@ -28,12 +28,8 @@ cleanup() {
   result=$?
   trap - EXIT
 
-  if [[ "$result" -ne 0 ]]; then
-    mkdir -p test-results
-    "${compose[@]}" logs --no-color >test-results/compose.log 2>&1 || true
-    if [[ "$keep_failed" == '1' ]]; then
-      exit "$result"
-    fi
+  if [[ "$result" -ne 0 && "$keep_failed" == '1' ]]; then
+    exit "$result"
   fi
 
   "${compose[@]}" down --volumes --remove-orphans

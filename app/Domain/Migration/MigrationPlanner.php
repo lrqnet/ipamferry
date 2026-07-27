@@ -21,6 +21,8 @@ class MigrationPlanner
 
     private array $customFieldActions = [];
 
+    private array $choiceSetActions = [];
+
     private array $identityLinks = [];
 
     private array $writeSchema = [];
@@ -51,6 +53,7 @@ class MigrationPlanner
         $this->warnings = array_values(array_merge($source['warnings'] ?? [], $target['warnings'] ?? []));
         $this->sourceActions = [];
         $this->customFieldActions = [];
+        $this->choiceSetActions = [];
         $this->target = $target['objects'] ?? $target;
         $this->writeSchema = $target['write_schema'] ?? [];
         $this->writeSchemaKnown = array_key_exists('write_schema', $target);
@@ -67,7 +70,10 @@ class MigrationPlanner
             $this->conflicts[] = ['reason' => 'invalid_mapping', 'message' => $error];
         }
 
-        $objects = $source['objects'] ?? $source;
+        $sourceObjects = $source['objects'] ?? $source;
+        $objects = $this->policy->schemaVersion() === 2
+            ? $this->objectsForPolicy($sourceObjects)
+            : $sourceObjects;
         $this->planCustomFields();
         if ($this->policy->schemaVersion() === 1) {
             $this->planVrfs($objects['vrfs'] ?? []);
@@ -89,7 +95,7 @@ class MigrationPlanner
             ] as $intent) {
                 $this->consumeIntent($intent);
             }
-            foreach ($relations->relations($objects, $this->policy) as $relation) {
+            foreach ($relations->relations($sourceObjects, $this->policy) as $relation) {
                 $this->consumeRelation($relation);
             }
         }
@@ -101,7 +107,7 @@ class MigrationPlanner
             'decisions' => $this->policy->preservationRules(),
             'unmigrated' => $source['preserved'] ?? [],
             'custom_field_definitions' => $source['custom_fields'] ?? [],
-            'source_records' => $this->sourceRecords($objects),
+            'source_records' => $this->sourceRecords($sourceObjects),
             'ignored' => array_values(array_filter(
                 $this->actions,
                 fn (array $action): bool => $action['operation'] === 'ignore',
@@ -175,6 +181,53 @@ class MigrationPlanner
             array_values(array_unique($dependencies)),
             (bool) ($intent['createApproved'] ?? true),
         );
+    }
+
+    private function objectsForPolicy(array $objects): array
+    {
+        $filtered = [];
+        foreach ($objects as $collection => $items) {
+            if (! is_array($items)) {
+                continue;
+            }
+            foreach ($items as $item) {
+                if (! is_array($item)) {
+                    continue;
+                }
+                $sourceType = (string) ($item['source_type'] ?? rtrim((string) $collection, 's'));
+                if ($this->policy->migrates($sourceType)) {
+                    $filtered[$collection][] = $item;
+                }
+            }
+        }
+
+        $referenceTypes = [
+            'tenant_source_id' => 'customer',
+            'vrf_source_id' => 'vrf',
+            'vlan_source_id' => 'vlan',
+            'vlan_group_source_id' => 'vlan_group',
+            'prefix_source_id' => 'prefix',
+            'parent_source_id' => 'prefix',
+            'location_source_id' => 'location',
+            'rack_source_id' => 'rack',
+            'device_source_id' => 'device',
+            'interface_source_id' => 'interface',
+            'provider_source_id' => 'provider',
+            'type_source_id' => 'circuit_type',
+        ];
+        foreach ($filtered as &$items) {
+            foreach ($items as &$item) {
+                foreach ($referenceTypes as $field => $type) {
+                    if (! $this->policy->migrates($type)) {
+                        $item[$field] = null;
+                    }
+                }
+            }
+            unset($item);
+        }
+        unset($items);
+
+        return $filtered;
     }
 
     private function consumeRelation(array $relation): void
@@ -253,10 +306,19 @@ class MigrationPlanner
     {
         $warningReasons = [
             'prefix_folder_preserved',
+            'netbox_prefix_zero_length_preserved',
+            'netbox_ip_address_zero_length_preserved',
+            'vlan_vid_invalid_preserved',
+            'vlan_vid_out_of_range_preserved',
             'device_ip_without_port',
+            'ip_dns_name_invalid_preserved',
             'pat_preserved',
+            'nat_cross_vrf_preserved',
+            'nat_many_to_many_preserved',
+            'nat_ip_pair_required',
             'nat_confirmation_required',
             'primary_ip_ambiguous',
+            'customer_contact_invalid_preserved',
         ];
         if (in_array($issue['reason'] ?? null, $warningReasons, true)) {
             $this->warnings[] = CanonicalJson::encode($issue);
@@ -300,15 +362,26 @@ class MigrationPlanner
     private function planVlans(array $objects): void
     {
         foreach ($objects as $object) {
+            $vid = $object['vid'] ?? null;
+            if (! is_int($vid) && ! (is_string($vid) && ctype_digit($vid))) {
+                $this->addIgnoredAction('vlan', $object, 'vlan_vid_invalid_preserved: VLAN ID is not an integer in the NetBox-supported range.');
+
+                continue;
+            }
+            if ((int) $vid < 1 || (int) $vid > 4094) {
+                $this->addIgnoredAction('vlan', $object, 'vlan_vid_out_of_range_preserved: VLAN ID must be between 1 and 4094 for NetBox.');
+
+                continue;
+            }
             $groupReference = $this->reference('vlan_group', $object['vlan_group_source_id'] ?? null);
             $dependencies = [
                 ...$this->dependencies($groupReference),
                 ...$this->customFieldDependencies('vlan'),
             ];
-            $naturalKey = ['vid' => $object['vid'], 'group_id' => $groupReference];
+            $naturalKey = ['vid' => (int) $vid, 'group_id' => $groupReference];
             $payload = array_filter([
-                'vid' => $object['vid'],
-                'name' => $object['name'] ?: 'VLAN '.$object['vid'],
+                'vid' => (int) $vid,
+                'name' => $object['name'] ?: 'VLAN '.$vid,
                 'status' => $this->policy->status('vlan', $object['source_status'] ?? null),
                 'group' => $groupReference,
                 'description' => $object['description'] ?? '',
@@ -333,6 +406,15 @@ class MigrationPlanner
         foreach ($objects as $object) {
             if (($object['is_folder'] ?? false) === true) {
                 $this->addIgnoredAction('prefix', $object, 'phpIPAM folder has no safe automatic NetBox equivalent.');
+
+                continue;
+            }
+            if ($this->prefixLength($object['prefix'] ?? null) === 0) {
+                $this->addIgnoredAction(
+                    'prefix',
+                    $object,
+                    'netbox_prefix_zero_length_preserved: NetBox does not accept a zero-length prefix; preserved for audit.',
+                );
 
                 continue;
             }
@@ -365,6 +447,15 @@ class MigrationPlanner
     private function planIpAddresses(array $objects): void
     {
         foreach ($objects as $object) {
+            if ($this->prefixLength($object['address'] ?? null) === 0) {
+                $this->addIgnoredAction(
+                    'ip_address',
+                    $object,
+                    'netbox_ip_address_zero_length_preserved: NetBox does not accept a zero-length IP address; preserved for audit.',
+                );
+
+                continue;
+            }
             $vrfReference = $this->reference('vrf', $object['vrf_source_id'] ?? null);
             $prefixReference = $this->reference('prefix', $object['prefix_source_id'] ?? null);
             $dependencies = [
@@ -496,6 +587,16 @@ class MigrationPlanner
         $differences = $existing === null ? [] : $this->differences($payload, $existing);
         $allowedUpdates = $this->policy->allowedUpdates($targetType);
         $updatePayload = array_intersect_key($differences, array_flip($allowedUpdates));
+        if (array_key_exists('assigned_object_id', $updatePayload)
+            && array_key_exists('assigned_object_type', $payload)
+            && in_array('assigned_object_type', $allowedUpdates, true)) {
+            $updatePayload['assigned_object_type'] = $payload['assigned_object_type'];
+        }
+        if (array_key_exists('assigned_object_type', $updatePayload)
+            && array_key_exists('assigned_object_id', $payload)
+            && in_array('assigned_object_id', $allowedUpdates, true)) {
+            $updatePayload['assigned_object_id'] = $payload['assigned_object_id'];
+        }
         if ($existing !== null && $updatePayload !== []) {
             $operation = 'update';
             $payload = $updatePayload;
@@ -625,7 +726,50 @@ class MigrationPlanner
                 'object_types' => $requiredObjectTypes,
                 'description' => (string) ($rules[0]['description'] ?? 'Migrated by IpamFerry'),
             ];
-            $this->addAction('custom_field', $source, ['name' => $targetName], $payload);
+            $dependencies = [];
+            if ($dataTypes[0] === 'select') {
+                $choiceSet = $rules[0]['choice_set'] ?? null;
+                if (! is_array($choiceSet) || ! is_string($choiceSet['name'] ?? null) || ! is_array($choiceSet['choices'] ?? null)) {
+                    $this->conflicts[] = [
+                        'reason' => 'custom_field_choice_set_missing',
+                        'target' => $targetName,
+                    ];
+
+                    continue;
+                }
+                $choiceSetName = trim($choiceSet['name']);
+                if (! isset($this->choiceSetActions[$choiceSetName])) {
+                    $this->addAction(
+                        'custom_field_choice_set',
+                        [
+                            'source_type' => 'mapping_custom_field_choice_set',
+                            'source_id' => $choiceSetName,
+                            'source_hash' => CanonicalJson::fingerprint($choiceSet),
+                        ],
+                        ['name' => $choiceSetName],
+                        [
+                            'name' => $choiceSetName,
+                            'extra_choices' => array_map(
+                                fn (mixed $choice): array => [(string) $choice, (string) $choice],
+                                $choiceSet['choices'],
+                            ),
+                        ],
+                        [],
+                        $choiceSet['approved'] === true,
+                    );
+                    $this->choiceSetActions[$choiceSetName] = $this->sourceActions['custom_field_choice_set'][$choiceSetName] ?? null;
+                }
+                $choiceSetAction = $this->choiceSetActions[$choiceSetName] ?? null;
+                if ($choiceSetAction === null) {
+                    continue;
+                }
+                $choiceSetTargetId = $this->actions[$choiceSetAction]['target_id'] ?? null;
+                $payload['choice_set'] = $choiceSetTargetId === null ? ['$ref' => $choiceSetAction] : (int) $choiceSetTargetId;
+                if ($choiceSetTargetId === null) {
+                    $dependencies[] = $choiceSetAction;
+                }
+            }
+            $this->addAction('custom_field', $source, ['name' => $targetName], $payload, $dependencies);
             $actionKey = $this->sourceActions['custom_field'][$targetName] ?? null;
             if ($actionKey !== null) {
                 foreach ($sourceTypes as $sourceType) {
@@ -704,9 +848,18 @@ class MigrationPlanner
             return ['$missing' => "{$targetType}:{$sourceId}"];
         }
 
-        $targetId = $this->actions[$actionKey]['target_id'] ?? null;
+        $action = $this->actions[$actionKey];
+        $targetId = $action['target_id'] ?? null;
 
-        return $targetId === null ? ['$ref' => $actionKey] : (int) $targetId;
+        // A pre-existing target can be referenced directly only when the
+        // planned action is a true reuse. An update still changes the target
+        // state, and every dependent relationship (for example a device
+        // primary IP) must wait for that PATCH to succeed.
+        if (($action['operation'] ?? null) !== 'reuse' || $targetId === null) {
+            return ['$ref' => $actionKey];
+        }
+
+        return (int) $targetId;
     }
 
     private function dependencies(array|int|null $reference): array
@@ -762,6 +915,7 @@ class MigrationPlanner
                 'ip_address' => (string) ($target['address'] ?? '') === (string) $naturalKey['address']
                     && $relatedId($target['vrf'] ?? null) === ($naturalKey['vrf_id'] ?? null),
                 'custom_field' => (string) ($target['name'] ?? '') === (string) $naturalKey['name'],
+                'custom_field_choice_set' => (string) ($target['name'] ?? '') === (string) $naturalKey['name'],
                 default => false,
             };
         }));
@@ -789,6 +943,20 @@ class MigrationPlanner
         array $payload,
         string $operation,
     ): bool {
+        foreach ($payload as $field => $value) {
+            $invalidText = $this->invalidTextReason($value);
+            if ($invalidText !== null) {
+                $this->conflicts[] = [
+                    'reason' => $invalidText,
+                    'source_type' => $source['source_type'] ?? $targetType,
+                    'source_id' => $source['source_id'] ?? null,
+                    'target_type' => $targetType,
+                    'field' => $field,
+                ];
+
+                return false;
+            }
+        }
         $schema = $this->writeSchema[$targetType] ?? [];
         if ($this->writeSchemaKnown && (! is_array($schema) || $schema === [])) {
             $this->conflicts[] = [
@@ -866,6 +1034,30 @@ class MigrationPlanner
         return true;
     }
 
+    private function invalidTextReason(mixed $value): ?string
+    {
+        if (is_array($value)) {
+            foreach ($value as $item) {
+                $reason = $this->invalidTextReason($item);
+                if ($reason !== null) {
+                    return $reason;
+                }
+            }
+
+            return null;
+        }
+        if (! is_string($value)) {
+            return null;
+        }
+        if (preg_match('//u', $value) !== 1) {
+            return 'target_text_encoding_invalid';
+        }
+
+        return preg_match('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', $value) === 1
+            ? 'target_text_control_character'
+            : null;
+    }
+
     private function fieldValueIsCompatible(mixed $value, array $definition): bool
     {
         if ($this->containsReference($value)) {
@@ -920,6 +1112,14 @@ class MigrationPlanner
     {
         $differences = [];
         foreach ($payload as $field => $desired) {
+            if ($field === 'assigned_object_id' && $this->containsReference($desired)) {
+                // A source reference cannot be resolved during planning, so an
+                // operator-approved assignment is deliberately PATCHed together
+                // with its type at apply time.
+                $differences[$field] = $desired;
+
+                continue;
+            }
             if ($this->containsReference($desired)) {
                 continue;
             }

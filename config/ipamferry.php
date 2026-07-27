@@ -7,6 +7,7 @@ return [
     'dump_retention_hours' => (int) env('IPAMFERRY_DUMP_RETENTION_HOURS', 24),
     'dump_max_rows' => (int) env('IPAMFERRY_DUMP_MAX_ROWS', 5_000_000),
     'allow_insecure_http' => (bool) env('IPAMFERRY_ALLOW_INSECURE_HTTP', false),
+    'extra_ca_bundle' => env('IPAMFERRY_EXTRA_CA_BUNDLE'),
     'netbox_page_size' => (int) env('IPAMFERRY_NETBOX_PAGE_SIZE', 200),
     'netbox_max_objects_per_type' => (int) env('IPAMFERRY_NETBOX_MAX_OBJECTS_PER_TYPE', 1_000_000),
     'phpipam_max_objects_per_type' => (int) env('IPAMFERRY_PHPIPAM_MAX_OBJECTS_PER_TYPE', 1_000_000),
@@ -18,4 +19,7 @@ return [
     'sandbox_probe_timeout_seconds' => (int) env('IPAMFERRY_SANDBOX_PROBE_TIMEOUT_SECONDS', 15),
     'sandbox_api_key_file' => env('IPAMFERRY_SANDBOX_API_KEY_FILE', '/run/ipamferry-secrets/superuser_api_key'),
     'sandbox_api_token_file' => env('IPAMFERRY_SANDBOX_API_TOKEN_FILE', '/run/ipamferry-secrets/superuser_api_token'),
+    // NetBox 4.4 uses the legacy single-token Authorization scheme. Newer
+    // supported releases use a v2 `nbt_<key>.<token>` bearer token.
+    'sandbox_token_format' => env('IPAMFERRY_SANDBOX_TOKEN_FORMAT', 'v2'),
 ];

@@ -43,6 +43,47 @@ class ApiClientsTest extends TestCase
             && ! str_contains($request->url(), 'phpipam-test-token'));
     }
 
+    public function test_phpipam_discovery_falls_back_to_an_authenticated_root_get_when_options_is_rejected(): void
+    {
+        Http::fake(function (Request $request) {
+            if ($request->method() === 'OPTIONS') {
+                return Http::response(['success' => false], 405);
+            }
+
+            return Http::response(['success' => true, 'data' => []], 200, [
+                'phpipam-version' => '1.8.1',
+                'api-version' => '1.8',
+            ]);
+        });
+
+        $inventory = (new PhpIpamClient(
+            'https://phpipam.example.test',
+            'ipamferry',
+            'phpipam-test-token',
+        ))->inventory();
+
+        self::assertSame('1.8.1', $inventory['instance']['version']);
+        Http::assertSent(fn (Request $request): bool => $request->method() === 'GET'
+            && $request->url() === 'https://phpipam.example.test/api/ipamferry/');
+    }
+
+    public function test_phpipam_discovery_uses_sections_when_a_proxy_rejects_the_application_root(): void
+    {
+        Http::fake(function (Request $request) {
+            if (in_array($request->method(), ['OPTIONS', 'GET'], true)
+                && str_ends_with($request->url(), '/api/ipamferry/')) {
+                return Http::response(['success' => false], 405);
+            }
+
+            return Http::response(['success' => true, 'data' => []], 200, ['phpipam-version' => '1.8.1']);
+        });
+
+        (new PhpIpamClient('https://phpipam.example.test', 'ipamferry', 'phpipam-test-token'))->inventory();
+
+        Http::assertSent(fn (Request $request): bool => $request->method() === 'GET'
+            && $request->url() === 'https://phpipam.example.test/api/ipamferry/sections/');
+    }
+
     public function test_netbox_discovery_follows_every_page_and_uses_v2_bearer_authentication(): void
     {
         config()->set('ipamferry.netbox_page_size', 1);

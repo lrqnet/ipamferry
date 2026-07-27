@@ -7,7 +7,7 @@ export default defineConfig({
   timeout: 45_000,
   forbidOnly: !!process.env.CI,
   reporter: process.env.CI ? [['html'], ['github']] : 'list',
-  use: { baseURL, ignoreHTTPSErrors: true, trace: 'on-first-retry', screenshot: 'only-on-failure' },
+  use: { baseURL, ignoreHTTPSErrors: true, trace: 'off', screenshot: 'off' },
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
     { name: 'firefox', use: { ...devices['Desktop Firefox'] } },

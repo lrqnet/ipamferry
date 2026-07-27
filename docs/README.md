@@ -8,6 +8,7 @@ IpamFerry documentation is English-first. Complete translations are available in
 - [Mapping Studio](MAPPING-STUDIO.md)
 - [Development](DEVELOPMENT.md)
 - [Operations and release](RELEASE.md)
+- [Release validation](VALIDATION.md)
 - [Historical plan](PLAN.md)
 - [Architecture decisions](adr/)
 

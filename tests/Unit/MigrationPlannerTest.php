@@ -236,11 +236,11 @@ class MigrationPlannerTest extends TestCase
         self::assertContains('unsupported_target_choice', array_column($result['conflicts'], 'reason'));
     }
 
-    public function test_netbox_write_schema_rejects_numeric_and_length_constraints_before_apply(): void
+    public function test_netbox_write_schema_rejects_length_constraints_before_apply(): void
     {
         $source = $this->source([
             'vlans' => [
-                $this->object('vlan', 'invalid', ['vid' => 4095, 'name' => str_repeat('x', 101)]),
+                $this->object('vlan', 'invalid', ['vid' => 4094, 'name' => str_repeat('x', 101)]),
             ],
         ]);
         $target = [
@@ -258,6 +258,37 @@ class MigrationPlannerTest extends TestCase
 
         self::assertContains('target_field_constraint', array_column($result['conflicts'], 'reason'));
         self::assertSame([], $result['actions']);
+    }
+
+    public function test_payload_text_accepts_unicode_html_markdown_and_newlines_at_the_limit_but_blocks_overflow_and_controls(): void
+    {
+        $atLimit = "# Heading\r\n**unicode** 🚢 <em>safe</em> / \\\"".str_repeat('x', 50);
+        $source = $this->source([
+            'prefixes' => [$this->object('prefix', 'safe', [
+                'prefix' => '2001:db8:feed::/64',
+                'description' => $atLimit,
+            ])],
+        ]);
+        $target = ['objects' => [], 'write_schema' => [
+            'prefix' => [
+                'prefix' => ['required' => true],
+                'status' => ['required' => true],
+                'description' => ['max_length' => mb_strlen($atLimit)],
+            ],
+        ]];
+
+        $accepted = (new MigrationPlanner)->plan($source, $target, MappingPolicy::defaults());
+        self::assertSame([], $accepted['conflicts']);
+
+        $overflow = $source;
+        $overflow['objects']['prefixes'][0]['description'] .= 'x';
+        $rejected = (new MigrationPlanner)->plan($overflow, $target, MappingPolicy::defaults());
+        self::assertContains('target_field_constraint', array_column($rejected['conflicts'], 'reason'));
+
+        $control = $source;
+        $control['objects']['prefixes'][0]['description'] = "valid\ntext\0";
+        $blocked = (new MigrationPlanner)->plan($control, $target, MappingPolicy::defaults());
+        self::assertContains('target_text_control_character', array_column($blocked['conflicts'], 'reason'));
     }
 
     public function test_existing_alternate_unique_identities_are_blocking_conflicts(): void

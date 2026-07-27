@@ -7,6 +7,7 @@ x-ipamferry-environment: &ipamferry-environment
   APP_ENV: production
   APP_DEBUG: "false"
   IPAMFERRY_SANDBOX_URL: http://sandbox-netbox:8080
+  IPAMFERRY_SANDBOX_TOKEN_FORMAT: ${IPAMFERRY_SANDBOX_TOKEN_FORMAT:-v2}
   DB_CONNECTION: pgsql
   DB_HOST: postgres
   DB_PORT: "5432"
@@ -162,7 +163,7 @@ services:
       - /bin/bash
       - -ec
       - |
-        ./manage.py shell --no-startup --no-imports --interface python -c "from users.choices import TokenVersionChoices; from users.models import Token, User; key=open('/run/secrets/superuser_api_key', encoding='utf-8').read().strip(); token=open('/run/secrets/superuser_api_token', encoding='utf-8').read().strip(); user=User.objects.get(username='ipamferry'); Token.objects.filter(key=key).delete(); Token.objects.create(user=user, token=token, version=TokenVersionChoices.V2, key=key)"
+        ./manage.py shell --no-startup --no-imports --interface python -c "from users.models import Token, User; key=open('/run/secrets/superuser_api_key', encoding='utf-8').read().strip(); token=open('/run/secrets/superuser_api_token', encoding='utf-8').read().strip(); user=User.objects.get(username='ipamferry'); legacy='IPAMFERRY_SANDBOX_TOKEN_FORMAT' in __import__('os').environ and __import__('os').environ['IPAMFERRY_SANDBOX_TOKEN_FORMAT'] == 'legacy'; Token.objects.filter(key=(token if legacy else key)).delete(); Token.objects.create(user=user, **({'key': token, 'write_enabled': True} if legacy else {'token': token, 'key': key, 'version': __import__('users.choices', fromlist=['TokenVersionChoices']).TokenVersionChoices.V2}))"
         exec /opt/netbox/launch-netbox.sh
     environment:
       ALLOWED_HOSTS: "*"
@@ -180,6 +181,7 @@ services:
       SKIP_SUPERUSER: "false"
       SUPERUSER_NAME: ipamferry
       SUPERUSER_EMAIL: sandbox@example.invalid
+      IPAMFERRY_SANDBOX_TOKEN_FORMAT: ${IPAMFERRY_SANDBOX_TOKEN_FORMAT:-v2}
     volumes: ["ipamferry_secrets:/run/secrets:ro"]
     depends_on:
       {
@@ -190,7 +192,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          'token="nbt_$$(cat /run/secrets/superuser_api_key).$$(cat /run/secrets/superuser_api_token)"; curl --fail --silent --header "Authorization: Bearer $$token" http://localhost:8080/api/status/ >/dev/null',
+          'if [ "$${IPAMFERRY_SANDBOX_TOKEN_FORMAT:-v2}" = legacy ]; then header="Authorization: Token $$(cat /run/secrets/superuser_api_token)"; else header="Authorization: Bearer nbt_$$(cat /run/secrets/superuser_api_key).$$(cat /run/secrets/superuser_api_token)"; fi; curl --fail --silent --header "$$header" http://localhost:8080/api/status/ >/dev/null',
         ]
       interval: 15s
       timeout: 20s

@@ -142,6 +142,7 @@ class NetBoxClient
                 ...$this->scopeFilter('vrf_id', $naturalKey['vrf_id'] ?? null),
             ],
             'custom_field' => ['name' => $naturalKey['name']],
+            'custom_field_choice_set' => ['name__ie' => $naturalKey['name']],
             default => throw new \InvalidArgumentException("Unsupported NetBox natural key for {$targetType}"),
         };
 
@@ -310,6 +311,7 @@ class NetBoxClient
             'ip_address' => (string) ($object['address'] ?? '') === (string) $key['address']
                 && $relatedId($object['vrf'] ?? null) === ($key['vrf_id'] ?? null),
             'custom_field' => (string) ($object['name'] ?? '') === (string) $key['name'],
+            'custom_field_choice_set' => (string) ($object['name'] ?? '') === (string) $key['name'],
             default => false,
         };
     }
@@ -323,7 +325,7 @@ class NetBoxClient
         }
 
         if ($response->failed()) {
-            throw new ExternalApiException('NetBox', $operation, $response->status());
+            throw new ExternalApiException('NetBox', $this->writeFailureOperation($operation, $response), $response->status());
         }
         $this->assertResponseSize($response, $operation);
 
@@ -339,7 +341,7 @@ class NetBoxClient
         }
 
         if ($response->failed()) {
-            throw new ExternalApiException('NetBox', $operation, $response->status());
+            throw new ExternalApiException('NetBox', $this->writeFailureOperation($operation, $response), $response->status());
         }
         $this->assertResponseSize($response, $operation);
 
@@ -353,6 +355,24 @@ class NetBoxClient
         if ($declared > $maximum || strlen($response->body()) > $maximum) {
             throw new ExternalApiException('NetBox', "{$operation}: configured response size limit exceeded");
         }
+    }
+
+    private function writeFailureOperation(string $operation, Response $response): string
+    {
+        $body = $response->json();
+        if (! is_array($body)) {
+            return $operation;
+        }
+
+        $fields = array_values(array_filter(array_keys($body), 'is_string'));
+        if ($fields === []) {
+            return $operation;
+        }
+
+        // API validation responses can echo submitted values. Expose only the
+        // bounded field names, never their messages or values, to preserve the
+        // no-secrets-in-logs invariant.
+        return $operation.' (validation fields: '.implode(', ', array_slice($fields, 0, 5)).')';
     }
 
     private function objectResponse(Response $response, string $operation): array

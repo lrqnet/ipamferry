@@ -79,6 +79,10 @@ php artisan test
 
 CLI output and re-executable JSON keys are always English. See the [documentation index](docs/README.md) for architecture, Mapping Studio, operations, releases, and ADRs.
 
+## Release validation
+
+The disposable real-source laboratory, version matrix, and coverage rules are documented in [Release validation](docs/VALIDATION.md).
+
 ## License
 
 IpamFerry is licensed under [AGPL-3.0-only](LICENSE).

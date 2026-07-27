@@ -574,7 +574,7 @@ class SqlDumpParser
 
     private function isSensitiveField(string $field): bool
     {
-        return preg_match('/(?:password|passwd|(?:^|[_-])pass(?:$|[_-])|token|secret|(?:api|access|private)[_-]?key|credential|community)/i', $field) === 1;
+        return preg_match('/(?:password|passwd|(?:^|[_-])pass(?:$|[_-])|token|secret|(?:api|access|private)[_-]?key|credential|community|permissions?|users?(?:name|groups?)?)/i', $field) === 1;
     }
 
     private function literal(string $literal): ?string

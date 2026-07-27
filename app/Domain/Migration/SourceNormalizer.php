@@ -10,6 +10,7 @@ class SourceNormalizer
         $subnetsById = collect($objects['subnets'] ?? [])->keyBy(fn (array $item): string => (string) ($item['id'] ?? ''));
         $warnings = array_values($inventory['warnings'] ?? []);
         $preserved = [];
+        $sensitiveExcluded = [];
 
         $normalized = [
             'customers' => array_values(array_map($this->normalizeCustomer(...), $objects['customers'] ?? [])),
@@ -66,6 +67,10 @@ class SourceNormalizer
         foreach ($objects['nat'] ?? [] as $nat) {
             $normalized['nat_relations'][] = $this->normalizeNat($nat);
         }
+        $normalized['nat_relations'] = $this->resolveNatReferences(
+            $normalized['nat_relations'],
+            $normalized['ip_addresses'],
+        );
         $normalized['interfaces'] = array_values($normalized['interfaces']);
         $normalized['mac_addresses'] = array_values($normalized['mac_addresses']);
 
@@ -92,6 +97,16 @@ class SourceNormalizer
                 continue;
             }
 
+            if ($this->isSensitiveExcludedObjectType((string) $type)) {
+                $sensitiveExcluded[(string) $type] = [
+                    'classification' => 'sensitive_excluded',
+                    'count' => is_array($rows) ? count($rows) : 0,
+                ];
+                $warnings[] = "phpIPAM {$type} records were excluded because this module can contain sensitive values.";
+
+                continue;
+            }
+
             $preserved[$type] = array_values(array_map(
                 fn (array $row): array => $this->sanitize($row),
                 is_array($rows) ? $rows : [],
@@ -106,11 +121,15 @@ class SourceNormalizer
 
         return [
             'schema_version' => 2,
-            'instance' => $inventory['instance'] ?? null,
+            // API discovery metadata can contain the application's permission
+            // scope. It is operationally useful only during discovery and must
+            // never become part of a project snapshot or export.
+            'instance' => $this->sanitize($inventory['instance'] ?? null),
             'normalized_at' => now()->toIso8601String(),
             'objects' => $normalized,
             'custom_fields' => $this->sanitize($inventory['custom_fields'] ?? []),
             'preserved' => $preserved,
+            'sensitive_excluded' => $sensitiveExcluded,
             'warnings' => array_values(array_unique($warnings)),
         ];
     }
@@ -119,7 +138,7 @@ class SourceNormalizer
     {
         return $this->canonical('customer', $source, [
             'name' => trim((string) ($source['title'] ?? $source['name'] ?? $source['company'] ?? '')),
-            'description' => trim((string) ($source['description'] ?? $source['comment'] ?? '')),
+            'description' => (string) ($source['description'] ?? $source['comment'] ?? ''),
             'contact_name' => trim((string) ($source['contact_person'] ?? $source['contact'] ?? '')),
             'contact_email' => trim((string) ($source['contact_mail'] ?? $source['email'] ?? '')),
             'contact_phone' => trim((string) ($source['contact_phone'] ?? $source['phone'] ?? '')),
@@ -131,7 +150,7 @@ class SourceNormalizer
     {
         return $this->canonical('section', $source, [
             'name' => trim((string) ($source['name'] ?? '')),
-            'description' => trim((string) ($source['description'] ?? '')),
+            'description' => (string) ($source['description'] ?? ''),
             'parent_source_id' => $this->reference($source['masterSection'] ?? $source['master_section'] ?? null),
         ]);
     }
@@ -140,7 +159,7 @@ class SourceNormalizer
     {
         return $this->canonical('tag', $source, [
             'name' => trim((string) ($source['type'] ?? $source['name'] ?? $source['tag'] ?? '')),
-            'description' => trim((string) ($source['description'] ?? '')),
+            'description' => (string) ($source['description'] ?? ''),
             'color' => ltrim(trim((string) ($source['bgcolor'] ?? $source['color'] ?? '9e9e9e')), '#'),
             'source_status' => $source['id'] ?? null,
         ]);
@@ -150,7 +169,7 @@ class SourceNormalizer
     {
         return $this->canonical('location', $source, [
             'name' => trim((string) ($source['name'] ?? $source['title'] ?? '')),
-            'description' => trim((string) ($source['description'] ?? '')),
+            'description' => (string) ($source['description'] ?? ''),
             'address' => trim((string) ($source['address'] ?? '')),
             'parent_source_id' => $this->reference($source['parent_id'] ?? $source['parent'] ?? null),
         ]);
@@ -160,7 +179,7 @@ class SourceNormalizer
     {
         return $this->canonical('rack', $source, [
             'name' => trim((string) ($source['name'] ?? $source['title'] ?? '')),
-            'description' => trim((string) ($source['description'] ?? '')),
+            'description' => (string) ($source['description'] ?? ''),
             'location_source_id' => $this->reference($source['location'] ?? $source['location_id'] ?? null),
             'u_height' => $this->nullableInt($source['size'] ?? $source['height'] ?? null),
             'row' => trim((string) ($source['row'] ?? '')),
@@ -169,9 +188,15 @@ class SourceNormalizer
 
     private function normalizeDeviceRole(array $source): array
     {
-        return $this->canonical('device_role', $source, [
+        // phpIPAM deviceTypes identifies rows with `tid` rather than the
+        // conventional `id` used by most controllers and dump tables.
+        $canonicalSource = ! array_key_exists('id', $source) && isset($source['tid'])
+            ? [...$source, 'id' => $source['tid']]
+            : $source;
+
+        return $this->canonical('device_role', $canonicalSource, [
             'name' => trim((string) ($source['tname'] ?? $source['name'] ?? $source['type'] ?? '')),
-            'description' => trim((string) ($source['tdescription'] ?? $source['description'] ?? '')),
+            'description' => (string) ($source['tdescription'] ?? $source['description'] ?? ''),
         ]);
     }
 
@@ -179,7 +204,7 @@ class SourceNormalizer
     {
         return $this->canonical('device', $source, [
             'name' => trim((string) ($source['hostname'] ?? $source['name'] ?? '')),
-            'description' => trim((string) ($source['description'] ?? '')),
+            'description' => (string) ($source['description'] ?? ''),
             'category_source_id' => $this->reference($source['type'] ?? $source['deviceType'] ?? null),
             'location_source_id' => $this->reference($source['location'] ?? $source['location_id'] ?? null),
             'rack_source_id' => $this->reference($source['rack'] ?? $source['rack_id'] ?? null),
@@ -237,7 +262,7 @@ class SourceNormalizer
     {
         return $this->canonical('provider', $source, [
             'name' => trim((string) ($source['name'] ?? $source['title'] ?? '')),
-            'description' => trim((string) ($source['description'] ?? '')),
+            'description' => (string) ($source['description'] ?? ''),
         ]);
     }
 
@@ -245,7 +270,7 @@ class SourceNormalizer
     {
         return $this->canonical('circuit_type', $source, [
             'name' => trim((string) ($source['ctname'] ?? $source['name'] ?? $source['type'] ?? $source['title'] ?? '')),
-            'description' => trim((string) ($source['description'] ?? '')),
+            'description' => (string) ($source['description'] ?? ''),
         ]);
     }
 
@@ -255,7 +280,7 @@ class SourceNormalizer
             'cid' => trim((string) ($source['cid'] ?? $source['circuit_id'] ?? $source['name'] ?? $source['id'] ?? '')),
             'provider_source_id' => $this->reference($source['provider'] ?? $source['provider_id'] ?? null),
             'type_source_id' => $this->reference($source['type'] ?? $source['type_id'] ?? null),
-            'description' => trim((string) ($source['description'] ?? $source['comment'] ?? '')),
+            'description' => (string) ($source['description'] ?? $source['comment'] ?? ''),
             'location_a_source_id' => $this->reference($source['location1'] ?? $source['location_a'] ?? $source['location'] ?? null),
             'location_z_source_id' => $this->reference($source['location2'] ?? $source['location_b'] ?? null),
             'status' => $source['status'] ?? null,
@@ -277,7 +302,7 @@ class SourceNormalizer
                 $synthetic = [...$row, 'id' => (string) (int) $asn];
                 $asns[(string) (int) $asn] = $this->canonical('asn', $synthetic, [
                     'asn' => (int) $asn,
-                    'description' => trim((string) ($row['description'] ?? '')),
+                    'description' => (string) ($row['description'] ?? ''),
                 ]);
             }
         }
@@ -298,6 +323,53 @@ class SourceNormalizer
         ]);
     }
 
+    /**
+     * phpIPAM NAT records commonly reference endpoint addresses as text, while
+     * NetBox relations must refer to the stable source IDs of IP objects. Resolve
+     * only an unambiguous host address; an ambiguous value deliberately remains
+     * unresolved and is preserved by the relation planner.
+     *
+     * @param  list<array<string, mixed>>  $relations
+     * @param  list<array<string, mixed>>  $addresses
+     * @return list<array<string, mixed>>
+     */
+    private function resolveNatReferences(array $relations, array $addresses): array
+    {
+        $bySourceId = [];
+        $byHost = [];
+        foreach ($addresses as $address) {
+            $sourceId = (string) ($address['source_id'] ?? '');
+            $host = explode('/', (string) ($address['address'] ?? ''))[0];
+            if ($sourceId === '' || $host === '') {
+                continue;
+            }
+            $bySourceId[$sourceId] = $address;
+            $byHost[$host][] = $address;
+        }
+
+        foreach ($relations as &$relation) {
+            foreach (['inside' => 'inside_ip_source_id', 'outside' => 'outside_ip_source_id'] as $side => $field) {
+                $raw = (string) ($relation[$field] ?? '');
+                $match = $bySourceId[$raw] ?? null;
+                if ($match === null) {
+                    $candidates = $byHost[explode('/', $raw)[0]] ?? [];
+                    $match = count($candidates) === 1 ? $candidates[0] : null;
+                }
+                if ($match === null) {
+                    $relation[$field] = null;
+                    $relation["{$side}_reference_ambiguous"] = $raw !== '';
+
+                    continue;
+                }
+                $relation[$field] = (string) $match['source_id'];
+                $relation["{$side}_vrf_source_id"] = $match['vrf_source_id'] ?? null;
+            }
+        }
+        unset($relation);
+
+        return $relations;
+    }
+
     private function normalizeVrf(array $source): array
     {
         return $this->canonical(
@@ -306,7 +378,7 @@ class SourceNormalizer
             [
                 'name' => trim((string) ($source['name'] ?? '')),
                 'rd' => trim((string) ($source['rd'] ?? '')) ?: null,
-                'description' => trim((string) ($source['description'] ?? '')),
+                'description' => (string) ($source['description'] ?? ''),
                 'tenant_source_id' => $this->reference($source['customer_id'] ?? $source['customerId'] ?? null),
             ],
         );
@@ -319,7 +391,7 @@ class SourceNormalizer
             $source,
             [
                 'name' => trim((string) ($source['name'] ?? $source['description'] ?? '')),
-                'description' => trim((string) ($source['description'] ?? '')),
+                'description' => (string) ($source['description'] ?? ''),
                 'scope' => null,
             ],
         );
@@ -333,7 +405,7 @@ class SourceNormalizer
             [
                 'vid' => $this->nullableInt($source['number'] ?? $source['vid'] ?? null),
                 'name' => trim((string) ($source['name'] ?? '')),
-                'description' => trim((string) ($source['description'] ?? '')),
+                'description' => (string) ($source['description'] ?? ''),
                 'vlan_group_source_id' => $this->reference($source['domainId'] ?? $source['domain_id'] ?? null),
                 'tenant_source_id' => $this->reference($source['customer_id'] ?? $source['customerId'] ?? null),
             ],
@@ -347,7 +419,7 @@ class SourceNormalizer
             $source,
             [
                 'prefix' => $this->prefix($source),
-                'description' => trim((string) ($source['description'] ?? '')),
+                'description' => (string) ($source['description'] ?? ''),
                 'vrf_source_id' => $this->reference($source['vrfId'] ?? $source['vrf_id'] ?? null),
                 'vlan_source_id' => $this->reference($source['vlanId'] ?? $source['vlan_id'] ?? null),
                 'parent_source_id' => $this->reference($source['masterSubnetId'] ?? $source['master_subnet_id'] ?? null),
@@ -358,6 +430,7 @@ class SourceNormalizer
                 'is_folder' => $this->truthy($source['isFolder'] ?? $source['is_folder'] ?? false),
                 'is_pool' => $this->truthy($source['isPool'] ?? $source['is_pool'] ?? false),
                 'mark_utilized' => $this->truthy($source['isFull'] ?? false),
+                'tag_source_id' => $this->reference($source['tag'] ?? $source['tag_id'] ?? null),
             ],
         );
     }
@@ -381,8 +454,9 @@ class SourceNormalizer
                 'prefix_source_id' => $subnetId,
                 'vrf_source_id' => $this->reference($subnet['vrfId'] ?? $subnet['vrf_id'] ?? null),
                 'dns_name' => trim((string) ($source['hostname'] ?? '')),
-                'description' => trim((string) ($source['description'] ?? '')),
+                'description' => (string) ($source['description'] ?? ''),
                 'source_status' => $source['tag'] ?? $source['state'] ?? null,
+                'tag_source_id' => $this->reference($source['tag'] ?? $source['tag_id'] ?? null),
                 'is_gateway' => $this->truthy($source['is_gateway'] ?? false),
                 'device_source_id' => $this->reference($source['deviceId'] ?? $source['switch'] ?? null),
                 'interface_source_id' => ($this->reference($source['deviceId'] ?? $source['switch'] ?? null) !== null
@@ -458,7 +532,13 @@ class SourceNormalizer
             return $packed === null ? '' : (inet_ntop($packed) ?: '');
         }
 
-        return filter_var($value, FILTER_VALIDATE_IP) ? $value : '';
+        if (! filter_var($value, FILTER_VALIDATE_IP)) {
+            return '';
+        }
+
+        $packed = inet_pton($value);
+
+        return $packed === false ? '' : (inet_ntop($packed) ?: '');
     }
 
     private function decimalToPacked(string $decimal): ?string
@@ -516,7 +596,7 @@ class SourceNormalizer
 
         $result = [];
         foreach ($value as $key => $item) {
-            if (is_string($key) && preg_match('/(?:password|passwd|(?:^|[_-])pass(?:$|[_-])|token|secret|(?:api|access|private)[_-]?key|credential|community)/i', $key)) {
+            if (is_string($key) && preg_match('/(?:snmp_.*|password|passwd|(?:^|[_-])pass(?:$|[_-])|token|secret|(?:api|access|private)[_-]?key|credential|community|permissions?|users?(?:name|groups?)?)/i', $key)) {
                 continue;
             }
             $result[$key] = $this->sanitize($item);
@@ -525,9 +605,17 @@ class SourceNormalizer
         return $result;
     }
 
+    private function isSensitiveExcludedObjectType(string $type): bool
+    {
+        return in_array(strtolower($type), [
+            'api', 'api_keys', 'apikeys', 'permissions', 'scanagents', 'scan_agents',
+            'user', 'users', 'usergroups', 'user_groups', 'vault', 'vaults',
+        ], true);
+    }
+
     private function reference(mixed $value): ?string
     {
-        if ($value === null || $value === '' || $value === 0 || $value === '0') {
+        if (! is_scalar($value) || $value === '' || $value === 0 || $value === '0') {
             return null;
         }
 

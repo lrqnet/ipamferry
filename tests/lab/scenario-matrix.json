@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "purpose": "Executable acceptance matrix for phpIPAM to NetBox laboratory validation.",
+  "outcomes": ["migrated", "preserved", "blocked", "rejected"],
+  "scenarios": [
+    {"id": "cidr.ipv4-boundaries", "outcome": "preserved", "source": ["0.0.0.0/0", "128.0.0.0/1", "198.51.100.0/30", "198.51.100.0/31", "198.51.100.1/32"], "assertion": "Zero-length records are preserved with an explicit warning; supported canonical prefixes and addresses are created in NetBox."},
+    {"id": "cidr.ipv6-boundaries", "outcome": "migrated", "source": ["2001:db8::/64", "2001:db8::/126", "2001:db8::/127", "2001:db8::1/128", "fe80::/64", "fd00::/8", "ff00::/8"], "assertion": "The real dump and API contain lower-case compressed canonical IPv6 values, including a /126 seeded with host bits, and NetBox receives those supported values."},
+    {"id": "vrf.identity-and-collision", "outcome": "blocked", "assertion": "Distinct VRFs permit duplicate prefixes; duplicate natural identities are conflicts; empty and duplicate RD behavior is explicit."},
+    {"id": "vlan.boundaries-and-groups", "outcome": "preserved", "assertion": "VID 1 and 4094 migrate; 0, 4095 and non-numeric IDs are preserved before any destination request; duplicate VID is safe across groups."},
+    {"id": "prefix.hierarchy-status-and-folders", "outcome": "migrated", "assertion": "Parent/child, pools, status, tags and utilized state migrate; phpIPAM folders are preserved."},
+    {"id": "ip.assignment-and-primary", "outcome": "migrated", "assertion": "Gateway, a valid DNS name, valid MAC/interface assignment and an unambiguous primary IP migrate; an invalid DNS name is preserved without blocking its IP, and a portless device IP is warned and remains unassigned."},
+    {"id": "text.encoding-and-limits", "outcome": "rejected", "assertion": "Unicode, emoji, CRLF/LF, HTML and Markdown pass unchanged at the schema limit; over-limit and control characters block planning."},
+    {"id": "custom-fields.types", "outcome": "blocked", "assertion": "Text, integer, boolean, date, selection, URL and JSON require compatible approved definitions; invalid/missing values block or preserve explicitly."},
+    {"id": "tenancy-and-contacts", "outcome": "migrated", "assertion": "Customers migrate as tenants; contacts/roles require explicit approval; invalid contact data remains traceable."},
+    {"id": "dcim.location-rack-device", "outcome": "blocked", "assertion": "Locations, racks, devices and interfaces require approved site, role, manufacturer, type and interface type; duplicate interfaces/MACs are conflicts."},
+    {"id": "circuits.terminations", "outcome": "blocked", "assertion": "Provider/type/circuit and safe A/Z terminations require approvals; incomplete, duplicate or ambiguous circuits do not partially migrate."},
+    {"id": "nat.safety", "outcome": "preserved", "assertion": "Only an explicitly confirmed static 1:1 pair migrates; PAT, incomplete, many-to-many and cross-VRF cases remain preserved."},
+    {"id": "target.drift-and-recovery", "outcome": "blocked", "assertion": "Reuse, opt-in PATCH, ETag drift, lost responses, checkpoint resume and repeated apply are safe and idempotent."},
+    {"id": "security.sanitization", "outcome": "rejected", "assertion": "SNMP secrets, API credentials, vaults, users, permissions and sessions never reach snapshots, plans, logs, reports or bundles."}
+  ]
+}

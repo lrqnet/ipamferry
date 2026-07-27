@@ -13,10 +13,15 @@ final class SandboxConnection
     {
         $key = $this->secret((string) config('ipamferry.sandbox_api_key_file'), 12);
         $token = $this->secret((string) config('ipamferry.sandbox_api_token_file'), 40);
+        $format = (string) config('ipamferry.sandbox_token_format', 'v2');
+
+        if (! in_array($format, ['v2', 'legacy'], true)) {
+            throw new RuntimeException('The internal NetBox sandbox credentials are unavailable.');
+        }
 
         return [
             'url' => (new EndpointPolicy)->canonicalize((string) config('ipamferry.sandbox_url')),
-            'token' => "nbt_{$key}.{$token}",
+            'token' => $format === 'legacy' ? $token : "nbt_{$key}.{$token}",
         ];
     }
 
@@ -31,8 +36,11 @@ final class SandboxConnection
         return Cache::remember('ipamferry:sandbox:available', 5, function (): bool {
             try {
                 $credentials = $this->credentials();
+                $authorization = str_starts_with($credentials['token'], 'nbt_')
+                    ? "Bearer {$credentials['token']}"
+                    : "Token {$credentials['token']}";
                 $response = Http::acceptJson()
-                    ->withToken($credentials['token'])
+                    ->withHeaders(['Authorization' => $authorization])
                     ->withoutRedirecting()
                     ->connectTimeout(2)
                     ->timeout(max(2, min(30, (int) config('ipamferry.sandbox_probe_timeout_seconds'))))

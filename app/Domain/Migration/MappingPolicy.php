@@ -261,6 +261,10 @@ class MappingPolicy
             }
 
             [$valid, $converted] = $this->convertValue($value, (string) ($rule['data_type'] ?? 'text'));
+            if ($valid && ($rule['data_type'] ?? 'text') === 'select') {
+                $choices = $rule['choice_set']['choices'] ?? [];
+                $valid = is_array($choices) && in_array($converted, $choices, true);
+            }
             if (! $valid) {
                 $errors[] = [
                     'rule' => $index,
@@ -402,6 +406,7 @@ class MappingPolicy
                 'data_type',
                 'label',
                 'description',
+                'choice_set',
             ];
             foreach (array_keys($rule) as $property) {
                 if (! in_array($property, $allowedProperties, true)) {
@@ -426,6 +431,7 @@ class MappingPolicy
                 'url',
                 'json',
                 'decimal',
+                'select',
             ], true)) {
                 $errors[] = "Custom-field rule {$index} has an unsupported data_type.";
             }
@@ -547,7 +553,7 @@ class MappingPolicy
 
                 continue;
             }
-            $allowed = ['id', 'action', 'source_type', 'source_field', 'target', 'target_kind', 'value', 'fields', 'separator', 'mode', 'table', 'default', 'data_type', 'label', 'description'];
+            $allowed = ['id', 'action', 'source_type', 'source_field', 'target', 'target_kind', 'value', 'fields', 'separator', 'mode', 'table', 'default', 'data_type', 'label', 'description', 'choice_set'];
             foreach (array_keys($rule) as $property) {
                 if (! in_array($property, $allowed, true)) {
                     $issues[] = $this->issue('mapping.unsupported_rule_property', "{$pointer}/".$this->pointer((string) $property), "Unsupported field-rule property {$property}.");
@@ -577,6 +583,19 @@ class MappingPolicy
             if (($rule['action'] ?? null) === 'lookup' && ! is_array($rule['table'] ?? null)) {
                 $issues[] = $this->issue('mapping.lookup_required', "{$pointer}/table", 'Lookup requires a conversion table.');
             }
+            if (($rule['data_type'] ?? 'text') === 'select') {
+                $choiceSet = $rule['choice_set'] ?? null;
+                $choices = is_array($choiceSet) ? ($choiceSet['choices'] ?? null) : null;
+                $validChoices = is_array($choices) && count($choices) >= 2
+                    && count(array_unique(array_map('strval', $choices))) === count($choices)
+                    && collect($choices)->every(fn (mixed $choice): bool => is_string($choice) && $choice !== '');
+                if (! is_array($choiceSet) || ! is_string($choiceSet['name'] ?? null) || trim((string) $choiceSet['name']) === '' || ! $validChoices) {
+                    $issues[] = $this->issue('mapping.choice_set_required', "{$pointer}/choice_set", 'Selection custom fields require a named choice set with at least two distinct values.');
+                }
+                if (is_array($choiceSet) && ! is_bool($choiceSet['approved'] ?? null)) {
+                    $issues[] = $this->issue('mapping.choice_set_approval_required', "{$pointer}/choice_set/approved", 'Choice-set creation must be explicitly approved or rejected.');
+                }
+            }
             $identity = (string) ($rule['source_type'] ?? '')."\0".(string) ($rule['target'] ?? '');
             if (($rule['action'] ?? null) !== 'ignore' && isset($seenTargets[$identity])) {
                 $issues[] = $this->issue('mapping.duplicate_target', "{$pointer}/target", 'A source type may write each target field only once.');
@@ -604,7 +623,7 @@ class MappingPolicy
             'vlan_group' => ['name', 'slug', 'description', 'tags', 'custom_fields'],
             'vlan' => ['name', 'status', 'description', 'comments', 'tags', 'custom_fields'],
             'prefix' => ['status', 'description', 'comments', 'is_pool', 'mark_utilized', 'tags', 'custom_fields'],
-            'ip_address' => ['status', 'dns_name', 'description', 'comments', 'tags', 'custom_fields'],
+            'ip_address' => ['status', 'dns_name', 'description', 'comments', 'tags', 'custom_fields', 'assigned_object_type', 'assigned_object_id'],
         ];
         foreach (($this->mapping['update_rules'] ?? []) as $type => $fields) {
             if (! isset($updateFields[$type]) || ! is_array($fields)) {
@@ -673,6 +692,9 @@ class MappingPolicy
             'decimal' => is_numeric($value) ? [true, (string) $value] : [false, null],
             'json' => $this->jsonValue($value),
             'date' => $this->dateValue($value),
+            'select' => is_scalar($value) || $value instanceof \Stringable
+                ? [true, (string) $value]
+                : [false, null],
             'url' => is_string($value) && filter_var($value, FILTER_VALIDATE_URL) !== false
                 ? [true, $value]
                 : [false, null],

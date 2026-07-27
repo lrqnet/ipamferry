@@ -43,14 +43,17 @@ final class RelationsPlanner
         }
 
         $nat = $policy->relationSettings('nat_1to1');
+        if ($nat === null) {
+            return $relations;
+        }
+        $eligibleNatRelations = [];
         foreach ($objects['nat_relations'] ?? [] as $relation) {
             if (($relation['has_ports'] ?? false) === true) {
                 $relations[] = PlannerIntent::issue('pat_preserved', 'nat', $relation['source_id'] ?? null);
 
                 continue;
             }
-            $confirmed = $nat !== null
-                && ($nat['confirmed'] ?? false) === true
+            $confirmed = ($nat['confirmed'] ?? false) === true
                 && in_array((string) ($relation['source_id'] ?? ''), array_map('strval', $nat['relation_ids'] ?? []), true);
             if (! $confirmed) {
                 $relations[] = PlannerIntent::issue('nat_confirmation_required', 'nat', $relation['source_id'] ?? null);
@@ -59,6 +62,30 @@ final class RelationsPlanner
             }
             if (($relation['inside_ip_source_id'] ?? null) === null || ($relation['outside_ip_source_id'] ?? null) === null) {
                 $relations[] = PlannerIntent::issue('nat_ip_pair_required', 'nat', $relation['source_id'] ?? null);
+
+                continue;
+            }
+            if (($relation['inside_vrf_source_id'] ?? null) !== ($relation['outside_vrf_source_id'] ?? null)) {
+                $relations[] = PlannerIntent::issue('nat_cross_vrf_preserved', 'nat', $relation['source_id'] ?? null);
+
+                continue;
+            }
+            $eligibleNatRelations[] = $relation;
+        }
+
+        $insideCounts = [];
+        $outsideCounts = [];
+        foreach ($eligibleNatRelations as $relation) {
+            $inside = (string) $relation['inside_ip_source_id'];
+            $outside = (string) $relation['outside_ip_source_id'];
+            $insideCounts[$inside] = ($insideCounts[$inside] ?? 0) + 1;
+            $outsideCounts[$outside] = ($outsideCounts[$outside] ?? 0) + 1;
+        }
+        foreach ($eligibleNatRelations as $relation) {
+            $inside = (string) $relation['inside_ip_source_id'];
+            $outside = (string) $relation['outside_ip_source_id'];
+            if (($insideCounts[$inside] ?? 0) > 1 || ($outsideCounts[$outside] ?? 0) > 1) {
+                $relations[] = PlannerIntent::issue('nat_many_to_many_preserved', 'nat', $relation['source_id'] ?? null);
 
                 continue;
             }

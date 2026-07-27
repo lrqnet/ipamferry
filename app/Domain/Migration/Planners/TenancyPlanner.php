@@ -59,6 +59,20 @@ final class TenancyPlanner
                 if (($customer['contact_name'] ?? '') === '' && ($customer['contact_email'] ?? '') === '') {
                     continue;
                 }
+                $email = trim((string) ($customer['contact_email'] ?? ''));
+                if ($email !== '' && filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
+                    // The tenant itself is safe to migrate. The invalid contact
+                    // must remain traceable instead of becoming a partial or
+                    // rejected NetBox contact assignment.
+                    $intents[] = PlannerIntent::issue(
+                        'customer_contact_invalid_preserved',
+                        'customer',
+                        $customer['source_id'] ?? null,
+                        ['field' => 'contact_email'],
+                    );
+
+                    continue;
+                }
                 $contactSource = [
                     ...$customer,
                     'source_type' => 'mapping_contact',
@@ -66,10 +80,10 @@ final class TenancyPlanner
                 ];
                 $intents[] = PlannerIntent::object('contact', $contactSource, [
                     'name' => $customer['contact_name'] ?: $customer['name'],
-                    'email' => $customer['contact_email'] ?? '',
+                    'email' => $email,
                 ], [
                     'name' => $customer['contact_name'] ?: $customer['name'],
-                    'email' => $customer['contact_email'] ?? '',
+                    'email' => $email,
                     'phone' => $customer['contact_phone'] ?? '',
                     'address' => $customer['address'] ?? '',
                 ]);

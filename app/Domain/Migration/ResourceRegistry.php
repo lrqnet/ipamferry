@@ -5,6 +5,7 @@ namespace App\Domain\Migration;
 final class ResourceRegistry
 {
     private const RESOURCES = [
+        'custom_field_choice_set' => ['endpoint' => 'extras/custom-field-choice-sets/', 'collection' => 'custom_field_choice_sets', 'phase' => 5],
         'custom_field' => ['endpoint' => 'extras/custom-fields/', 'collection' => 'custom_fields', 'phase' => 10],
         'tag' => ['endpoint' => 'extras/tags/', 'collection' => 'tags', 'phase' => 10],
         'tenant' => ['endpoint' => 'tenancy/tenants/', 'collection' => 'tenants', 'phase' => 10],
