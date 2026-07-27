@@ -433,8 +433,8 @@ class MigrationPlannerTest extends TestCase
             ])],
         ]);
         $mapping = MappingPolicy::v2Defaults();
-        $mapping['object_policies']['prefix'] = 'migrate';
-        $mapping['object_policies']['tag'] = 'migrate';
+        $mapping['object_policies']['prefix'] = ['policy' => 'migrate', 'target_type' => 'prefix'];
+        $mapping['object_policies']['tag'] = ['policy' => 'migrate', 'target_type' => 'tag'];
 
         $result = (new MigrationPlanner)->plan($source, ['objects' => []], $mapping);
         $prefix = collect($result['actions'])->firstWhere('target_type', 'prefix');
