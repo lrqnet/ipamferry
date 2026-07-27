@@ -181,9 +181,10 @@ test("claims an installation and migrates baseline and expanded inventories", as
   await page.getByRole("button", { name: "Run preview" }).click();
   await expect(page.getByText("Completed")).toBeVisible({ timeout: 30_000 });
   const previewConflicts = page.getByTestId("preview-conflicts");
-  const previewConflictCount = await previewConflicts.count();
-  if (previewConflictCount > 0) {
-    console.error(`Preview conflicts: ${await previewConflicts.allTextContents()}`);
+  const previewConflictItems = previewConflicts.getByRole("listitem");
+  const previewConflictCount = await previewConflictItems.count();
+  if (previewConflictCount !== 0) {
+    console.error(`Preview conflicts: ${await previewConflictItems.allTextContents()}`);
   }
   expect(previewConflictCount).toBe(0);
   await page.getByRole("link", { name: "Back to project" }).click();

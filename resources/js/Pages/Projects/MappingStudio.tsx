@@ -2273,7 +2273,7 @@ function PreviewPanel({
                   <ul className="mt-3 list-disc space-y-1 pl-5" data-testid="preview-conflicts">
                     {result.conflicts.map((conflict, index) => (
                       <li key={`${String(conflict.reason ?? "conflict")}-${index}`}>
-                        {String(conflict.reason ?? "unknown_conflict")}
+                        {JSON.stringify(conflict)}
                       </li>
                     ))}
                   </ul>
