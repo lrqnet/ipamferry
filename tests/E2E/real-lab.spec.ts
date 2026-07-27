@@ -1,5 +1,16 @@
 import { expect, test } from "@playwright/test";
 
+const hasRealLabCredentials = Boolean(
+  process.env.IPAMFERRY_INSTALLATION_TOKEN &&
+    process.env.IPAMFERRY_LAB_READ_TOKEN &&
+    process.env.IPAMFERRY_LAB_DUMP_FILE,
+);
+
+test.skip(
+  !hasRealLabCredentials,
+  "requires disposable real-laboratory credentials and a dump path",
+);
+
 test("migrates a real phpIPAM inventory through the sandbox NetBox API", async ({
   page,
 }) => {
@@ -7,9 +18,7 @@ test("migrates a real phpIPAM inventory through the sandbox NetBox API", async (
   const installationToken = process.env.IPAMFERRY_INSTALLATION_TOKEN;
   const phpIpamToken = process.env.IPAMFERRY_LAB_READ_TOKEN;
   const dumpFile = process.env.IPAMFERRY_LAB_DUMP_FILE;
-  if (!installationToken || !phpIpamToken || !dumpFile) {
-    throw new Error("The real laboratory credentials and dump path are required.");
-  }
+  if (!installationToken || !phpIpamToken || !dumpFile) return;
 
   await page.goto("/setup");
   if (page.url().endsWith("/setup")) {

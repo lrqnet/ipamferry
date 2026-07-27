@@ -37,6 +37,33 @@ cleanup() {
 }
 trap cleanup EXIT
 
+wait_for_service_health() {
+  local service="$1"
+  local container status
+
+  # A clean NetBox database runs its complete migration set on first boot.
+  # Eleven minutes matches the sandbox healthcheck budget and leaves room for
+  # slower shared CI runners while remaining inside the workflow timeout.
+  for _ in $(seq 1 330); do
+    container="$("${compose[@]}" ps --quiet "$service")"
+    status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container" 2>/dev/null || true)"
+
+    if [[ "$status" == 'healthy' ]]; then
+      return 0
+    fi
+
+    if [[ "$status" == 'unhealthy' || "$status" == 'exited' || "$status" == 'dead' ]]; then
+      "${compose[@]}" logs "$service"
+      return 1
+    fi
+
+    sleep 2
+  done
+
+  "${compose[@]}" logs "$service"
+  return 1
+}
+
 "${compose[@]}" down --volumes --remove-orphans
 if [[ -n "$netbox_seed" ]]; then
   [[ -f "$netbox_seed" ]]
@@ -53,10 +80,15 @@ if [[ -n "$netbox_seed" ]]; then
     /var/lib/postgresql/ipamferry-e2e-seed.dump
   "${compose[@]}" exec --no-TTY sandbox-postgres \
     psql --username=netbox --dbname=netbox --command='TRUNCATE TABLE users_token CASCADE'
-  "${compose[@]}" up --detach --wait
+  "${compose[@]}" up --detach
 else
-  "${compose[@]}" up --detach --build --wait
+  "${compose[@]}" up --detach --build
 fi
+
+# worker and scheduler are intentionally long-running processes without a
+# healthcheck. Wait only for services with a meaningful readiness probe.
+wait_for_service_health app
+wait_for_service_health sandbox-netbox
 
 for _ in $(seq 1 45); do
   if curl --fail --insecure --silent --show-error "${IPAMFERRY_E2E_BASE_URL}/up" >/dev/null; then break; fi
