@@ -178,20 +178,14 @@ test("claims an installation and migrates baseline and expanded inventories", as
   await page.getByRole("button", { name: "Save mapping" }).click();
   await expect(page.getByText("Mapping saved.")).toBeVisible();
   await page.getByRole("button", { name: "Preview" }).click();
-  const completedPreview = page.waitForResponse(async (response) => {
-    if (!/\/mapping\/previews\/\d+$/.test(response.url())) return false;
-    const payload = (await response.clone().json()) as { status?: string };
-    return payload.status === "completed";
-  });
   await page.getByRole("button", { name: "Run preview" }).click();
   await expect(page.getByText("Completed")).toBeVisible({ timeout: 30_000 });
-  const preview = (await (await completedPreview).json()) as {
-    result?: { conflicts?: unknown[] };
-  };
-  expect(
-    preview.result?.conflicts,
-    JSON.stringify(preview.result?.conflicts),
-  ).toEqual([]);
+  await expect(
+    page
+      .getByText("Conflicts", { exact: true })
+      .locator("..")
+      .getByText("0", { exact: true }),
+  ).toBeVisible();
   await page.getByRole("link", { name: "Back to project" }).click();
 
   await page.getByRole("button", { name: "Generate plan" }).click();
