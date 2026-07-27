@@ -180,12 +180,12 @@ test("claims an installation and migrates baseline and expanded inventories", as
   await page.getByRole("button", { name: "Preview" }).click();
   await page.getByRole("button", { name: "Run preview" }).click();
   await expect(page.getByText("Completed")).toBeVisible({ timeout: 30_000 });
-  await expect(
-    page
-      .getByText("Conflicts", { exact: true })
-      .locator("..")
-      .getByText("0", { exact: true }),
-  ).toBeVisible();
+  const previewConflicts = page.getByTestId("preview-conflicts");
+  const previewConflictCount = await previewConflicts.count();
+  if (previewConflictCount > 0) {
+    console.error(`Preview conflicts: ${await previewConflicts.allTextContents()}`);
+  }
+  expect(previewConflictCount).toBe(0);
   await page.getByRole("link", { name: "Back to project" }).click();
 
   await page.getByRole("button", { name: "Generate plan" }).click();
