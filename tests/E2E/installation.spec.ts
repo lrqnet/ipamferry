@@ -207,12 +207,12 @@ test("claims an installation and migrates baseline and expanded inventories", as
       "NetBox target refreshed. Generate and approve a new target-specific plan.",
     ),
   ).toBeVisible({ timeout: 180_000 });
+  const stalePlanNotice = page.getByText(
+    "This plan is stale because the discovery snapshot or mapping changed. Generate a new plan.",
+  );
+  await expect(stalePlanNotice).toBeVisible({ timeout: 30_000 });
   await page.getByRole("button", { name: "Generate plan" }).click();
-  await expect(
-    page.getByText(
-      "This plan is stale because the discovery snapshot or mapping changed. Generate a new plan.",
-    ),
-  ).not.toBeVisible({ timeout: 30_000 });
+  await expect(stalePlanNotice).not.toBeVisible({ timeout: 30_000 });
   const siblingPlanSummary = page.getByText(/\d+ actions, \d+ conflicts/);
   await expect(siblingPlanSummary).toBeVisible({ timeout: 30_000 });
   const siblingPlanSummaryText = await siblingPlanSummary.innerText();
