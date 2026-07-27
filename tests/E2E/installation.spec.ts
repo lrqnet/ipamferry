@@ -216,12 +216,21 @@ test("claims an installation and migrates baseline and expanded inventories", as
     ),
   ).toBeVisible({ timeout: 180_000 });
   await page.getByRole("button", { name: "Generate plan" }).click();
+  const siblingPlanSummary = page.getByText(/\d+ actions, \d+ conflicts/);
+  try {
+    await expect(siblingPlanSummary).toBeVisible({ timeout: 30_000 });
+  } catch (error) {
+    console.error(`Sibling plan diagnostics: ${await page.locator("main").innerText()}`);
+    throw error;
+  }
+  const siblingPlanSummaryText = await siblingPlanSummary.innerText();
+  if (!/\d+ actions, 0 conflicts/.test(siblingPlanSummaryText)) {
+    console.error(`Sibling plan diagnostics: ${await page.locator("main").textContent()}`);
+  }
+  expect(siblingPlanSummaryText).toMatch(/\d+ actions, 0 conflicts/);
   await expect(
     page.getByLabel("I reviewed the diff and approve this exact fingerprint"),
   ).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText(/\d+ actions, 0 conflicts/)).toBeVisible({
-    timeout: 30_000,
-  });
   await page
     .getByLabel("I reviewed the diff and approve this exact fingerprint")
     .check();
