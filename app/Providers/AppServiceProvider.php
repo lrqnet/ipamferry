@@ -16,7 +16,10 @@ class AppServiceProvider extends ServiceProvider
 
             return Limit::perMinute(5)->by(hash('sha256', $identity));
         });
-        RateLimiter::for('migration-write', fn ($request) => Limit::perMinute(10)->by((string) $request->user()?->id));
+        // A normal wizard run performs discovery, mapping, preview, refresh,
+        // planning and approvals in quick succession. Keep an authenticated
+        // per-user limit, but leave enough headroom for that legitimate flow.
+        RateLimiter::for('migration-write', fn ($request) => Limit::perMinute(60)->by((string) $request->user()?->id));
         RateLimiter::for('migration-apply', fn ($request) => Limit::perMinute(120)->by((string) $request->user()?->id));
     }
 }
