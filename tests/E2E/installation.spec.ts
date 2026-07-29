@@ -1,4 +1,14 @@
-import { expect, test } from "@playwright/test";
+import { expect, Page, test } from "@playwright/test";
+
+async function acknowledgePreservationIfPresent(page: Page): Promise<void> {
+  const acknowledgement = page.getByLabel(
+    "I reviewed and accept the preservation decisions shown above",
+  );
+
+  if (await acknowledgement.count()) {
+    await acknowledgement.check();
+  }
+}
 
 test("claims an installation and migrates baseline and expanded inventories", async ({
   page,
@@ -94,6 +104,7 @@ test("claims an installation and migrates baseline and expanded inventories", as
   await page
     .getByLabel("I reviewed the diff and approve this exact fingerprint")
     .check();
+  await acknowledgePreservationIfPresent(page);
   await page.getByRole("button", { name: "Approve plan" }).click();
   await page.getByLabel("I confirm applying this exact approved plan").check();
   await page.getByRole("button", { name: "Apply through API" }).click();
@@ -190,6 +201,7 @@ test("claims an installation and migrates baseline and expanded inventories", as
   await page
     .getByLabel("I reviewed the diff and approve this exact fingerprint")
     .check();
+  await acknowledgePreservationIfPresent(page);
   await page.getByRole("button", { name: "Approve plan" }).click();
   await page.getByLabel("I confirm applying this exact approved plan").check();
   await page.getByRole("button", { name: "Apply through API" }).click();
@@ -212,7 +224,9 @@ test("claims an installation and migrates baseline and expanded inventories", as
   );
   await expect(stalePlanNotice).toBeVisible({ timeout: 30_000 });
   const siblingPlanRequest = page.waitForResponse(
-    (response) => /\/projects\/\d+\/plan$/.test(response.url()) && response.request().method() === "POST",
+    (response) =>
+      /\/projects\/\d+\/plan$/.test(response.url()) &&
+      response.request().method() === "POST",
   );
   await page.getByRole("button", { name: "Generate plan" }).click();
   const siblingPlanResponse = await siblingPlanRequest;
@@ -229,6 +243,7 @@ test("claims an installation and migrates baseline and expanded inventories", as
   await page
     .getByLabel("I reviewed the diff and approve this exact fingerprint")
     .check();
+  await acknowledgePreservationIfPresent(page);
   await page.getByRole("button", { name: "Approve plan" }).click();
   await page.getByLabel("I confirm applying this exact approved plan").check();
   await page.getByRole("button", { name: "Apply through API" }).click();
