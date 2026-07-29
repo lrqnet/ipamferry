@@ -2,8 +2,8 @@ import { expect, test } from "@playwright/test";
 
 const hasRealLabCredentials = Boolean(
   process.env.IPAMFERRY_INSTALLATION_TOKEN &&
-    process.env.IPAMFERRY_LAB_READ_TOKEN &&
-    process.env.IPAMFERRY_LAB_DUMP_FILE,
+  process.env.IPAMFERRY_LAB_READ_TOKEN &&
+  process.env.IPAMFERRY_LAB_DUMP_FILE,
 );
 
 test.skip(
@@ -25,7 +25,9 @@ test("migrates a real phpIPAM inventory through the sandbox NetBox API", async (
     await page.getByLabel("Token").fill(installationToken);
     await page.getByLabel("Name").fill("Laboratory Owner");
     await page.getByLabel("Email").fill("owner@lab.example.test");
-    await page.getByLabel("Password", { exact: true }).fill("CorrectHorseBattery1!");
+    await page
+      .getByLabel("Password", { exact: true })
+      .fill("CorrectHorseBattery1!");
     await page.getByLabel("Confirm password").fill("CorrectHorseBattery1!");
     await page.getByRole("button", { name: "Create owner" }).click();
   } else {
@@ -33,7 +35,9 @@ test("migrates a real phpIPAM inventory through the sandbox NetBox API", async (
     await page.getByLabel("Password").fill("CorrectHorseBattery1!");
     await page.getByRole("button", { name: "Log in" }).click();
   }
-  await expect(page.getByRole("heading", { name: "Migration projects" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Migration projects" }),
+  ).toBeVisible();
 
   await page.getByRole("link", { name: "New project" }).click();
   await page.getByLabel("Name").fill("Real phpIPAM API discovery");
@@ -47,7 +51,9 @@ test("migrates a real phpIPAM inventory through the sandbox NetBox API", async (
   await page.getByLabel("phpIPAM application ID").fill("ipamferry-read");
   await page.getByLabel("phpIPAM token").fill(phpIpamToken);
   await page.getByRole("button", { name: "Run discovery" }).click();
-  await expect(page.getByText("sections", { exact: true })).toBeVisible({ timeout: 180_000 });
+  await expect(page.getByText("sections", { exact: true })).toBeVisible({
+    timeout: 180_000,
+  });
   await expect(page.getByText("subnets", { exact: true })).toBeVisible();
 
   await page.goto("/projects");
@@ -60,57 +66,112 @@ test("migrates a real phpIPAM inventory through the sandbox NetBox API", async (
   await page.getByLabel("Use the internal disposable NetBox sandbox").check();
   await page.getByLabel("SQL dump").setInputFiles(dumpFile);
   await page.getByRole("button", { name: "Read dump" }).click();
-  await expect(page.getByText("customers", { exact: true })).toBeVisible({ timeout: 180_000 });
+  await expect(page.getByText("customers", { exact: true })).toBeVisible({
+    timeout: 180_000,
+  });
   await expect(page.getByText("nat_relations", { exact: true })).toBeVisible();
 
   await page.getByRole("link", { name: "Open Mapping Studio" }).click();
   await page.getByRole("button", { name: "Accept all" }).click();
   await page.getByRole("button", { name: "Relations" }).click();
   await page.getByLabel("Location classification", { exact: true }).check();
-  const locationCard = page.getByRole("heading", { name: "Classify phpIPAM locations" }).locator("..");
+  const locationCard = page
+    .getByRole("heading", { name: "Classify phpIPAM locations" })
+    .locator("..");
   await locationCard.locator("select").first().selectOption("site");
   await page.getByLabel("Device prerequisites", { exact: true }).check();
-  await page.getByPlaceholder("Manufacturer", { exact: true }).fill("IpamFerry Lab");
-  await page.getByPlaceholder("Physical device model", { exact: true }).fill("Laboratory Router");
-  await page.getByPlaceholder("NetBox interface type", { exact: true }).fill("1000base-t");
+  await page
+    .getByPlaceholder("Manufacturer", { exact: true })
+    .fill("IpamFerry Lab");
+  await page
+    .getByPlaceholder("Physical device model", { exact: true })
+    .fill("Laboratory Router");
+  await page
+    .getByPlaceholder("NetBox interface type", { exact: true })
+    .fill("1000base-t");
+  await page
+    .getByText("I confirm this physical manufacturer and model")
+    .locator("..")
+    .getByRole("checkbox")
+    .check();
   await page.getByLabel("Customer contacts", { exact: true }).check();
-  await page.getByPlaceholder("Contact Role name", { exact: true }).fill("Customer");
+  await page
+    .getByPlaceholder("Contact Role name", { exact: true })
+    .fill("Customer");
   await page.getByLabel("ASN / RIR", { exact: true }).check();
   await page.getByPlaceholder("RIR name", { exact: true }).fill("Private");
   await page.getByLabel("Circuit terminations", { exact: true }).check();
-  const circuitCard = page.getByRole("heading", { name: "Confirmed circuit terminations" }).locator("..");
+  const circuitCard = page
+    .getByRole("heading", { name: "Confirmed circuit terminations" })
+    .locator("..");
   await circuitCard.getByRole("checkbox").first().check();
   await page.getByLabel("Primary IP", { exact: true }).check();
   await page.getByLabel("Static NAT 1:1", { exact: true }).check();
-  const natCard = page.getByRole("heading", { name: "Confirm static 1:1 NAT" }).locator("..");
+  const natCard = page
+    .getByRole("heading", { name: "Confirm static 1:1 NAT" })
+    .locator("..");
   await natCard.getByRole("checkbox").first().check();
   await page.getByRole("button", { name: "Save mapping" }).click();
   await expect(page.getByText("Mapping saved.")).toBeVisible();
   await page.getByRole("button", { name: "Preview" }).click();
   await page.getByRole("button", { name: "Run preview" }).click();
   await expect(page.getByText("Completed")).toBeVisible({ timeout: 120_000 });
-  await expect(page.getByText("Conflicts", { exact: true }).locator("..").getByText("0", { exact: true })).toBeVisible();
+  await expect(
+    page
+      .getByText("Conflicts", { exact: true })
+      .locator("..")
+      .getByText("0", { exact: true }),
+  ).toBeVisible();
   await page.getByRole("link", { name: "Back to project" }).click();
 
   await page.getByRole("button", { name: "Generate plan" }).click();
-  await expect(page.getByText(/\d+ actions, 0 conflicts/)).toBeVisible({ timeout: 120_000 });
-  await page.getByLabel("I reviewed the diff and approve this exact fingerprint").check();
+  await expect(page.getByText(/\d+ actions, 0 conflicts/)).toBeVisible({
+    timeout: 120_000,
+  });
+  await page
+    .getByLabel("I reviewed the diff and approve this exact fingerprint")
+    .check();
+  const preservationAcknowledgement = page.getByLabel(
+    "I understand that preserved data will not be applied to NetBox",
+  );
+  if (await preservationAcknowledgement.count()) {
+    await preservationAcknowledgement.check();
+  }
   await page.getByRole("button", { name: "Approve plan" }).click();
   await page.getByLabel("I confirm applying this exact approved plan").check();
   await page.getByRole("button", { name: "Apply through API" }).click();
-  await expect(page.getByText(/Execution #\d+: Applied/)).toBeVisible({ timeout: 180_000 });
+  await expect(page.getByText(/Execution #\d+: Applied/)).toBeVisible({
+    timeout: 180_000,
+  });
   await page.getByRole("button", { name: "Run verification" }).click();
-  await expect(page.getByText(/Execution #\d+: Verified/)).toBeVisible({ timeout: 120_000 });
+  await expect(page.getByText(/Execution #\d+: Verified/)).toBeVisible({
+    timeout: 120_000,
+  });
 
   await page.getByRole("button", { name: "Refresh NetBox target" }).click();
-  await expect(page.getByText("NetBox target refreshed. Generate and approve a new target-specific plan.")).toBeVisible({ timeout: 180_000 });
+  await expect(
+    page.getByText(
+      "NetBox target refreshed. Generate and approve a new target-specific plan.",
+    ),
+  ).toBeVisible({ timeout: 180_000 });
   await page.getByRole("button", { name: "Generate plan" }).click();
-  await expect(page.getByText(/\d+ actions, 0 conflicts/)).toBeVisible({ timeout: 120_000 });
-  await page.getByLabel("I reviewed the diff and approve this exact fingerprint").check();
+  await expect(page.getByText(/\d+ actions, 0 conflicts/)).toBeVisible({
+    timeout: 120_000,
+  });
+  await page
+    .getByLabel("I reviewed the diff and approve this exact fingerprint")
+    .check();
+  if (await preservationAcknowledgement.count()) {
+    await preservationAcknowledgement.check();
+  }
   await page.getByRole("button", { name: "Approve plan" }).click();
   await page.getByLabel("I confirm applying this exact approved plan").check();
   await page.getByRole("button", { name: "Apply through API" }).click();
-  await expect(page.getByText(/Execution #\d+: Applied/)).toBeVisible({ timeout: 180_000 });
+  await expect(page.getByText(/Execution #\d+: Applied/)).toBeVisible({
+    timeout: 180_000,
+  });
   await page.getByRole("button", { name: "Run verification" }).click();
-  await expect(page.getByText(/Execution #\d+: Verified/)).toBeVisible({ timeout: 120_000 });
+  await expect(page.getByText(/Execution #\d+: Verified/)).toBeVisible({
+    timeout: 120_000,
+  });
 });

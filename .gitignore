@@ -2,12 +2,16 @@
 /node_modules
 /public/build
 /.env
+/.DS_Store
+/**/.DS_Store
 /AGENTS.md
 /.phpunit.result.cache
 /playwright-report
 /test-results
 /tmp/lab
 /tmp/lab-results
+/tests/lab/input/*
+!/tests/lab/input/.gitignore
 /storage/*.key
 /storage/app/private/*
 !/storage/app/private/.gitignore

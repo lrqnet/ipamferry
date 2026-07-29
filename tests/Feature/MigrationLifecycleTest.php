@@ -413,6 +413,51 @@ class MigrationLifecycleTest extends TestCase
                 ->missing('project.target_snapshot'));
     }
 
+    public function test_plan_with_preserved_data_requires_an_explicit_second_acknowledgement(): void
+    {
+        [$project, , $user] = $this->plannedProject(1);
+        $project->plans()->delete();
+        $source = $project->source_snapshot;
+        $source['preserved'] = ['nameservers' => [['source_id' => 'private-source-id']]];
+        $project->update(['source_snapshot' => $source, 'status' => MigrationProjectStatus::Discovered]);
+        (new BuildMigrationPlan($project->id))->handle(
+            app(MigrationPlanner::class),
+            app(MigrationAudit::class),
+            app(MigrationOperationLock::class),
+        );
+        $plan = $project->plans()->latest('id')->firstOrFail();
+
+        $this->actingAs($user)
+            ->post(route('projects.plans.approve', [$project, $plan]), ['confirm' => true])
+            ->assertSessionHasErrors('preservation_acknowledged');
+        self::assertNull($plan->fresh()->approved_at);
+
+        $this->actingAs($user)
+            ->post(route('projects.plans.approve', [$project, $plan]), [
+                'confirm' => true,
+                'preservation_acknowledged' => true,
+            ])
+            ->assertRedirect();
+        self::assertNotNull($plan->fresh()->approved_at);
+        $event = DB::table('migration_events')
+            ->where('plan_id', $plan->id)
+            ->where('kind', 'plan.preservation_acknowledged')
+            ->first();
+        self::assertNotNull($event);
+        self::assertStringNotContainsString('private-source-id', json_encode($event, JSON_THROW_ON_ERROR));
+    }
+
+    public function test_plan_without_preserved_data_needs_only_the_normal_approval_confirmation(): void
+    {
+        [$project, $plan, $user] = $this->plannedProject(1);
+        $plan->update(['approved_at' => null, 'approved_by' => null]);
+
+        $this->actingAs($user)
+            ->post(route('projects.plans.approve', [$project, $plan]), ['confirm' => true])
+            ->assertRedirect();
+        self::assertNotNull($plan->fresh()->approved_at);
+    }
+
     private function plannedProject(int $vrfCount): array
     {
         $user = $this->user(UserRole::Owner);

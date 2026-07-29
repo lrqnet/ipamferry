@@ -1638,6 +1638,19 @@ function RelationsStudio({
                     className={input}
                     placeholder={t("mapping.interface_type")}
                   />
+                  <label className="flex items-center gap-2 text-sm text-amber-100 md:col-span-4">
+                    <input
+                      type="checkbox"
+                      disabled={!editable}
+                      checked={category.hardware_confirmed === true}
+                      onChange={(event) =>
+                        updateCategory({
+                          hardware_confirmed: event.target.checked,
+                        })
+                      }
+                    />
+                    {t("mapping.confirm_physical_model")}
+                  </label>
                 </div>
               );
             })}

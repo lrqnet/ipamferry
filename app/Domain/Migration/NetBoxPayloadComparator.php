@@ -25,15 +25,29 @@ final class NetBoxPayloadComparator
                 continue;
             }
 
-            $actualValue = $this->normalizeActual($this->actualValue((string) $field, $actual), $value);
-            if ($actualValue !== $value) {
+            $expectedValue = $this->normalizeExpected((string) $field, $value);
+            $actualValue = $this->normalizeActual($this->actualValue((string) $field, $actual), $expectedValue);
+            if ($actualValue !== $expectedValue) {
                 $differences[$field] = $includeValues
-                    ? ['expected' => $value, 'actual' => $actualValue]
+                    ? ['expected' => $expectedValue, 'actual' => $actualValue]
                     : true;
             }
         }
 
         return $differences;
+    }
+
+    private function normalizeExpected(string $field, mixed $value): mixed
+    {
+        if (! is_string($value)) {
+            return $value;
+        }
+
+        return match ($field) {
+            'dns_name' => strtolower(rtrim($value, '.')),
+            'description', 'comments' => trim($value),
+            default => $value,
+        };
     }
 
     private function actualValue(string $field, array $actual): mixed
@@ -53,6 +67,9 @@ final class NetBoxPayloadComparator
 
     private function normalizeActual(mixed $actual, mixed $expected): mixed
     {
+        if ($expected === '' && $actual === null) {
+            return '';
+        }
         if (is_int($expected) && is_float($actual) && is_finite($actual) && $actual === (float) $expected) {
             return $expected;
         }

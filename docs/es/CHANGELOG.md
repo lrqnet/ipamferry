@@ -4,7 +4,7 @@
 
 Todos los cambios relevantes de este proyecto se documentan en este archivo.
 
-## [0.2.0] - Sin publicar
+## [0.2.0] - 2026-07-28
 
 ### Añadido
 

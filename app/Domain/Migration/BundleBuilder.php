@@ -11,7 +11,10 @@ use ZipArchive;
 
 class BundleBuilder
 {
-    public function __construct(private readonly PlanIntegrity $integrity) {}
+    public function __construct(
+        private readonly PlanIntegrity $integrity,
+        private readonly PrefixHierarchy $prefixHierarchy,
+    ) {}
 
     public function build(MigrationProject $project, ?MigrationPlan $plan = null): string
     {
@@ -31,6 +34,7 @@ class BundleBuilder
         $generatedAt = now()->toIso8601String();
         $execution = $plan->executions()->with('actionResults')->latest('id')->first();
         $preservationSummary = $this->preservationSummary($plan->preservation);
+        $prefixHierarchy = $this->prefixHierarchy->fromActions($plan->actions);
         $report = [
             'locale' => $locale,
             'title' => Lang::get('ipamferry.report.title', [], $locale),
@@ -59,6 +63,12 @@ class BundleBuilder
                 'title' => Lang::get('ipamferry.report.preservation', [], $locale),
                 'categories' => $preservationSummary,
             ],
+            'prefix_hierarchy' => [
+                'title' => Lang::get('ipamferry.report.prefix_hierarchy', [], $locale),
+                'roots' => count($prefixHierarchy),
+                'prefixes' => $this->prefixCount($prefixHierarchy),
+                'tree' => $prefixHierarchy,
+            ],
         ];
         $files = [
             'mapping.json' => $this->json($plan->mapping_snapshot),
@@ -83,6 +93,11 @@ class BundleBuilder
             ]),
             'report.html' => $this->html($report, $locale),
             'coverage.json' => $this->json($this->coverage($plan)),
+            'prefix-hierarchy.json' => $this->json([
+                'schema_version' => 1,
+                'title' => Lang::get('ipamferry.report.prefix_hierarchy', [], $locale),
+                'roots' => $prefixHierarchy,
+            ]),
             'proposed-references.json' => $this->json([
                 'schema_version' => 1,
                 'reference_rules' => $plan->mapping_snapshot['reference_rules'] ?? [],
@@ -195,13 +210,16 @@ class BundleBuilder
             array_keys($report['preservation']['categories']),
         ));
 
-        return '<!doctype html><html lang="'.e(str_replace('_', '-', $locale)).'"><head><meta charset="utf-8"><title>'.e($report['title']).'</title></head><body><h1>'.e($report['title']).'</h1><p>'.e($report['summary']).'</p><p><strong>'.e(Lang::get('ipamferry.report.generated_at', [], $locale)).':</strong> '.e($report['generated_at']).'</p><h2>'.e(Lang::get('ipamferry.report.warnings', [], $locale)).'</h2><ul>'.$warnings.'</ul><h2>'.e($report['preservation']['title']).'</h2><table><thead><tr><th>'.e(Lang::get('ipamferry.report.category', [], $locale)).'</th><th>'.e(Lang::get('ipamferry.report.objects', [], $locale)).'</th></tr></thead><tbody>'.$preservation.'</tbody></table></body></html>';
+        return '<!doctype html><html lang="'.e(str_replace('_', '-', $locale)).'"><head><meta charset="utf-8"><title>'.e($report['title']).'</title></head><body><h1>'.e($report['title']).'</h1><p>'.e($report['summary']).'</p><p><strong>'.e(Lang::get('ipamferry.report.generated_at', [], $locale)).':</strong> '.e($report['generated_at']).'</p><h2>'.e(Lang::get('ipamferry.report.warnings', [], $locale)).'</h2><ul>'.$warnings.'</ul><h2>'.e($report['preservation']['title']).'</h2><table><thead><tr><th>'.e(Lang::get('ipamferry.report.category', [], $locale)).'</th><th>'.e(Lang::get('ipamferry.report.objects', [], $locale)).'</th></tr></thead><tbody>'.$preservation.'</tbody></table><h2>'.e($report['prefix_hierarchy']['title']).'</h2>'.$this->prefixTree($report['prefix_hierarchy']['tree'] ?? []).'</body></html>';
     }
 
     private function preservationSummary(array $preservation): array
     {
         $summary = [];
         foreach ($preservation as $category => $value) {
+            if (in_array($category, ['decisions', 'source_records', 'ignored'], true)) {
+                continue;
+            }
             if (! is_array($value)) {
                 $summary[$category] = 0;
 
@@ -239,5 +257,25 @@ class BundleBuilder
             'operations' => $operations,
             'preservation' => $this->preservationSummary($plan->preservation),
         ];
+    }
+
+    private function prefixCount(array $nodes): int
+    {
+        return array_sum(array_map(fn (array $node): int => 1 + $this->prefixCount($node['children'] ?? []), $nodes));
+    }
+
+    private function prefixTree(array $nodes): string
+    {
+        if ($nodes === []) {
+            return '<p>0</p>';
+        }
+        $items = implode('', array_map(function (array $node): string {
+            $label = e($node['prefix']);
+            $description = isset($node['description']) ? ' — '.e($node['description']) : '';
+
+            return '<li><code>'.$label.'</code>'.$description.$this->prefixTree($node['children'] ?? []).'</li>';
+        }, $nodes));
+
+        return '<ul>'.$items.'</ul>';
     }
 }

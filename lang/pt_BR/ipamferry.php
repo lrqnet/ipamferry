@@ -10,6 +10,7 @@ return [
         'warnings' => 'Avisos',
         'category' => 'Categoria',
         'objects' => 'Objetos',
+        'prefix_hierarchy' => 'Hierarquia de prefixos',
         'issues' => [
             'prefix_folder_preserved' => 'Uma pasta do phpIPAM não possui equivalente seguro no NetBox e continua preservada.',
             'device_ip_without_port' => 'Um IP vinculado a device não possui porta e continua sem atribuição.',

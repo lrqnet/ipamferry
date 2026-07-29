@@ -20,6 +20,7 @@ type Plan = {
   conflict_count: number;
   conflicts: Record<string, unknown>[];
   warnings: string[];
+  preservation_summary: Record<string, number>;
   actions_truncated: boolean;
   conflicts_truncated: boolean;
   warnings_truncated: boolean;
@@ -548,6 +549,32 @@ export default function Show({
                 </div>
               </details>
 
+              {Object.keys(latestPlan.preservation_summary).length > 0 && (
+                <section
+                  className="mt-4 rounded border border-amber-400/50 bg-amber-950/30 p-4"
+                  aria-labelledby="preservation-title"
+                >
+                  <h3
+                    id="preservation-title"
+                    className="font-semibold text-amber-100"
+                  >
+                    {t("show.preservation_title")}
+                  </h3>
+                  <p className="mt-1 text-sm text-amber-100/80">
+                    {t("show.preservation_help")}
+                  </p>
+                  <ul className="mt-3 grid gap-1 text-sm text-amber-50 sm:grid-cols-2">
+                    {Object.entries(latestPlan.preservation_summary).map(
+                      ([category, count]) => (
+                        <li key={category}>
+                          <code>{category}</code>: {count}
+                        </li>
+                      ),
+                    )}
+                  </ul>
+                </section>
+              )}
+
               {!latestPlan.approved_at &&
                 latestPlan.is_current &&
                 canApprove && (
@@ -560,6 +587,17 @@ export default function Show({
                       <input name="confirm" type="checkbox" required />{" "}
                       {t("show.confirm_approve")}
                     </label>
+                    {Object.keys(latestPlan.preservation_summary).length >
+                      0 && (
+                      <label className="mt-3 block text-sm text-amber-100">
+                        <input
+                          name="preservation_acknowledged"
+                          type="checkbox"
+                          required
+                        />{" "}
+                        {t("show.confirm_preservation")}
+                      </label>
+                    )}
                     <button
                       disabled={latestPlan.conflict_count > 0}
                       className="mt-3 rounded bg-amber-300 px-4 py-2 font-semibold text-slate-950 disabled:opacity-50"

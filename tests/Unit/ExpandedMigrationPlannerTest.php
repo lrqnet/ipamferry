@@ -883,6 +883,74 @@ class ExpandedMigrationPlannerTest extends TestCase
         self::assertArrayNotHasKey('primary_ip4', $relations[0]['payload']);
     }
 
+    public function test_generic_hardware_requires_explicit_confirmation_before_any_dcim_hardware_is_planned(): void
+    {
+        $mapping = MappingPolicy::v2Defaults();
+        foreach (['location', 'device_role', 'device'] as $type) {
+            $mapping['object_policies'][$type] = ['policy' => 'migrate', 'target_type' => $type];
+        }
+        $mapping['relation_rules'] = [
+            ['id' => 'location', 'relation' => 'location_classification', 'enabled' => true, 'settings' => [
+                'locations' => ['site' => ['kind' => 'site', 'name' => 'Lab', 'slug' => 'lab', 'approved' => true]],
+            ]],
+            ['id' => 'device', 'relation' => 'device_defaults', 'enabled' => true, 'settings' => [
+                'categories' => ['router' => [
+                    'manufacturer' => ['name' => 'Generic', 'slug' => 'generic', 'approved' => true],
+                    'device_type' => ['model' => 'Generic Router', 'slug' => 'generic-router', 'approved' => true],
+                    'interface_type' => '1000base-t',
+                ]],
+            ]],
+        ];
+        $source = ['objects' => [
+            'locations' => [$this->source('location', 'site', ['name' => 'Lab'])],
+            'device_roles' => [$this->source('device_role', 'router', ['name' => 'Router'])],
+            'devices' => [$this->source('device', 'edge-01', ['name' => 'edge-01', 'category_source_id' => 'router', 'location_source_id' => 'site'])],
+        ]];
+
+        $blocked = (new MigrationPlanner)->plan($source, ['objects' => []], $mapping);
+        self::assertContains('device_prerequisites_required', array_column($blocked['conflicts'], 'reason'));
+        self::assertNotContains('manufacturer', array_column($blocked['actions'], 'target_type'));
+        self::assertNotContains('device_type', array_column($blocked['actions'], 'target_type'));
+        self::assertNotContains('device', array_column($blocked['actions'], 'target_type'));
+
+        $mapping['relation_rules'][1]['settings']['categories']['router']['hardware_confirmed'] = true;
+        $confirmed = (new MigrationPlanner)->plan($source, ['objects' => []], $mapping);
+        self::assertSame([], $confirmed['conflicts']);
+        self::assertContains('manufacturer', array_column($confirmed['actions'], 'target_type'));
+        self::assertContains('device_type', array_column($confirmed['actions'], 'target_type'));
+        self::assertContains('device', array_column($confirmed['actions'], 'target_type'));
+    }
+
+    public function test_specific_hardware_does_not_require_a_generic_hardware_confirmation(): void
+    {
+        $mapping = MappingPolicy::v2Defaults();
+        foreach (['location', 'device_role', 'device'] as $type) {
+            $mapping['object_policies'][$type] = ['policy' => 'migrate', 'target_type' => $type];
+        }
+        $mapping['relation_rules'] = [
+            ['id' => 'location', 'relation' => 'location_classification', 'enabled' => true, 'settings' => [
+                'locations' => ['site' => ['kind' => 'site', 'name' => 'Lab', 'slug' => 'lab', 'approved' => true]],
+            ]],
+            ['id' => 'device', 'relation' => 'device_defaults', 'enabled' => true, 'settings' => [
+                'categories' => ['router' => [
+                    'manufacturer' => ['name' => 'Acme Networks', 'slug' => 'acme', 'approved' => true],
+                    'device_type' => ['model' => 'Edge 1000', 'slug' => 'edge-1000', 'approved' => true],
+                    'interface_type' => '1000base-t',
+                ]],
+            ]],
+        ];
+        $source = ['objects' => [
+            'locations' => [$this->source('location', 'site', ['name' => 'Lab'])],
+            'device_roles' => [$this->source('device_role', 'router', ['name' => 'Router'])],
+            'devices' => [$this->source('device', 'edge-01', ['name' => 'edge-01', 'category_source_id' => 'router', 'location_source_id' => 'site'])],
+        ]];
+
+        $result = (new MigrationPlanner)->plan($source, ['objects' => []], $mapping);
+
+        self::assertSame([], $result['conflicts']);
+        self::assertContains('device', array_column($result['actions'], 'target_type'));
+    }
+
     private function source(string $type, string $id, array $values): array
     {
         return [

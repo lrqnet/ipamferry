@@ -12,6 +12,18 @@ IpamFerry maintains a disposable, local laboratory for validating a real phpIPAM
 
 The lab creates short-lived credentials in Docker volumes, exposes only loopback test interfaces, validates the phpIPAM read-only API, creates a `mysqldump --single-transaction` in the ignored `tmp/lab/` directory, and removes all lab volumes and generated files when it finishes.
 
+## Protected external anonymized dumps
+
+An approved, anonymized dump can be validated against a disposable NetBox sandbox with an explicit mapping file:
+
+```bash
+./scripts/lab-external-dump.sh /secure/path/source.sql /secure/path/mapping.json
+```
+
+The command mounts both files read-only, parses the dump as data only, creates and verifies an approved plan through the NetBox API, resumes one-action checkpoints, repeats apply for idempotency, inspects the generated bundle for sensitive fields, and destroys volumes, temporary files, and the bundle on exit. It never contacts the original phpIPAM instance.
+
+GitHub Actions provides the same path only through the protected `external-corpus-validation` environment and a manual workflow. Its `IPAMFERRY_EXTERNAL_DUMP_B64` and `IPAMFERRY_EXTERNAL_MAPPING_B64` secrets must contain an approved anonymized corpus and mapping. GitHub secret size limits apply; use the local command or an approved private runner for larger corpora. The workflow uploads no dump, mapping, bundle, trace, screenshot, or container log.
+
 ## Compatibility matrix
 
 The immutable source image tags and digests are in [`tests/lab/compatibility-manifest.json`](../tests/lab/compatibility-manifest.json). Release validation requires the following isolated combinations:

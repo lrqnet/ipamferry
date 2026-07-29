@@ -1,7 +1,7 @@
 name: ipamferry
 
 x-ipamferry-image: &ipamferry-image
-  image: ${IPAMFERRY_IMAGE:-docker.io/lrqnet/ipamferry:0.1.0}
+  image: ${IPAMFERRY_IMAGE:-docker.io/lrqnet/ipamferry:0.2.0}
 
 x-ipamferry-environment: &ipamferry-environment
   APP_ENV: production

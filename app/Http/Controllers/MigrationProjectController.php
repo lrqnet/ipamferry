@@ -104,6 +104,7 @@ class MigrationProjectController extends Controller
                 'conflict_count' => count($latestPlan->conflicts),
                 'conflicts' => array_slice($latestPlan->conflicts, 0, 500),
                 'warnings' => array_slice($latestPlan->warnings, 0, 500),
+                'preservation_summary' => $this->preservationSummary($latestPlan->preservation),
                 'actions_truncated' => count($latestPlan->actions) > 500,
                 'conflicts_truncated' => count($latestPlan->conflicts) > 500,
                 'warnings_truncated' => count($latestPlan->warnings) > 500,
@@ -382,6 +383,10 @@ class MigrationProjectController extends Controller
     ): RedirectResponse {
         $this->assertPlan($project, $plan);
         $request->validate(['confirm' => ['accepted']]);
+        $preservation = $this->preservationSummary($plan->preservation);
+        if (array_sum($preservation) > 0) {
+            $request->validate(['preservation_acknowledged' => ['accepted']]);
+        }
         try {
             $lock = $operations->acquire($project);
             $operations->assertPlanOperationAllowed($project, $plan);
@@ -389,6 +394,15 @@ class MigrationProjectController extends Controller
             $approvedNow = $plan->approve($request->user());
             $project->update(['status' => MigrationProjectStatus::Approved]);
             if ($approvedNow) {
+                if ($preservation !== []) {
+                    $audit->record(
+                        $project,
+                        'plan.preservation_acknowledged',
+                        ['categories' => $preservation],
+                        $request->user()->id,
+                        $plan->id,
+                    );
+                }
                 $audit->record(
                     $project,
                     'plan.approved',
@@ -637,5 +651,27 @@ class MigrationProjectController extends Controller
         return $request->boolean('use_sandbox')
             ? $sandbox->credentials()
             : ['url' => $data['netbox_url'], 'token' => $data['netbox_token']];
+    }
+
+    private function preservationSummary(array $preservation): array
+    {
+        $summary = [];
+        foreach ($preservation as $category => $value) {
+            if (in_array($category, ['decisions', 'source_records', 'ignored'], true)) {
+                continue;
+            }
+            if (! is_array($value)) {
+                continue;
+            }
+            $count = array_is_list($value)
+                ? count($value)
+                : array_sum(array_map(fn (mixed $items): int => is_array($items) ? count($items) : 1, $value));
+            if ($count > 0) {
+                $summary[(string) $category] = $count;
+            }
+        }
+        ksort($summary, SORT_STRING);
+
+        return $summary;
     }
 }

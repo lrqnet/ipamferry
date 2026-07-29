@@ -12,6 +12,18 @@ IpamFerry mantiene un laboratorio local desechable para validar un origen phpIPA
 
 El laboratorio crea credenciales temporales en volúmenes Docker, expone solo interfaces de prueba en loopback, valida la API phpIPAM de solo lectura, crea un `mysqldump --single-transaction` en el directorio ignorado `tmp/lab/` y elimina los volúmenes y archivos generados al terminar.
 
+## Dumps externos anonimizados y protegidos
+
+Un dump anonimizado aprobado puede validarse contra un sandbox de NetBox desechable con un archivo de mapeo explícito:
+
+```bash
+./scripts/lab-external-dump.sh /ruta-segura/origen.sql /ruta-segura/mapeo.json
+```
+
+El comando monta ambos archivos como solo lectura, interpreta el dump únicamente como datos, crea y verifica un plan aprobado mediante la API de NetBox, reanuda checkpoints de una acción, repite la aplicación para probar idempotencia, inspecciona el bundle en busca de campos sensibles y destruye volúmenes, temporales y bundle al finalizar. No se conecta a la instancia phpIPAM original.
+
+GitHub Actions ofrece la misma ruta solo mediante el entorno protegido `external-corpus-validation` y un workflow manual. Los secrets `IPAMFERRY_EXTERNAL_DUMP_B64` e `IPAMFERRY_EXTERNAL_MAPPING_B64` deben contener un corpus anonimizado y mapeo aprobados. Se aplican los límites de tamaño de secrets de GitHub; use el comando local o un runner privado aprobado para corpus mayores. El workflow no publica dump, mapeo, bundle, trace, captura ni log de contenedor.
+
 ## Matriz de compatibilidad
 
 Las etiquetas y los digests inmutables están en [`tests/lab/compatibility-manifest.json`](../../tests/lab/compatibility-manifest.json). La validación requiere phpIPAM 1.5.2, 1.7.4 y 1.8.1 con NetBox 4.6.1 en recorrido profundo, y phpIPAM 1.8.1 con NetBox 4.4.10 y 4.5.10 en smoke.

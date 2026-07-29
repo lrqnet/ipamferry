@@ -190,7 +190,7 @@ class SourceNormalizer
     {
         // phpIPAM deviceTypes identifies rows with `tid` rather than the
         // conventional `id` used by most controllers and dump tables.
-        $canonicalSource = ! array_key_exists('id', $source) && isset($source['tid'])
+        $canonicalSource = (! isset($source['id']) || $source['id'] === '') && isset($source['tid'])
             ? [...$source, 'id' => $source['tid']]
             : $source;
 

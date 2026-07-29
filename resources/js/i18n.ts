@@ -84,6 +84,11 @@ export const resources = {
       "show.confirm_approve":
         "I reviewed the diff and approve this exact fingerprint",
       "show.approve": "Approve plan",
+      "show.preservation_title": "Data preserved outside NetBox",
+      "show.preservation_help":
+        "These records will not be silently migrated. Review their handling in the audit bundle before approving.",
+      "show.confirm_preservation":
+        "I reviewed and accept the preservation decisions shown above",
       "show.applying": "Applying batch…",
       "show.resume": "Resume apply",
       "show.execution": "Execution #{{id}}",
@@ -200,6 +205,8 @@ export const resources = {
       "mapping.device_categories": "Device category requirements",
       "mapping.device_help":
         "Each category requires a Role, Manufacturer, physical Device Type and Interface Type.",
+      "mapping.confirm_physical_model":
+        "I confirmed that this manufacturer and physical model are accurate. Generic values require confirmation.",
       "mapping.device_exceptions": "Individual device exceptions",
       "mapping.device_exceptions_help":
         "Override the category role, hardware, or interface type only for devices that need an exception.",
@@ -329,7 +336,7 @@ export const resources = {
       "conflict.rack_site_required":
         "A rack requires a resolved Site and optional Location.",
       "conflict.device_prerequisites_required":
-        "The device is missing a Site, Role, Manufacturer or Device Type mapping.",
+        "The device is missing a Site, Role, Manufacturer, Device Type, or physical-model confirmation.",
       "conflict.interface_type_required":
         "The interface requires an approved NetBox interface type.",
       "conflict.circuit_prerequisites_required":
@@ -493,6 +500,11 @@ export const resources = {
       "show.identity": "Chave natural",
       "show.confirm_approve": "Revisei o diff e aprovo este fingerprint exato",
       "show.approve": "Aprovar plano",
+      "show.preservation_title": "Dados preservados fora do NetBox",
+      "show.preservation_help":
+        "Esses registros não serão migrados silenciosamente. Revise o tratamento no bundle auditável antes de aprovar.",
+      "show.confirm_preservation":
+        "Revisei e aceito as decisões de preservação exibidas acima",
       "show.applying": "Aplicando lote…",
       "show.resume": "Retomar aplicação",
       "show.execution": "Execução #{{id}}",
@@ -612,6 +624,8 @@ export const resources = {
       "mapping.device_categories": "Requisitos por categoria de device",
       "mapping.device_help":
         "Cada categoria exige Role, Manufacturer, Device Type físico e tipo de Interface.",
+      "mapping.confirm_physical_model":
+        "Confirmo que este fabricante e modelo físico estão corretos. Valores genéricos exigem confirmação.",
       "mapping.device_exceptions": "Exceções individuais de devices",
       "mapping.device_exceptions_help":
         "Substitua o papel da categoria, hardware ou tipo de interface somente nos devices que precisam de exceção.",
@@ -746,7 +760,7 @@ export const resources = {
       "conflict.rack_site_required":
         "Um rack exige Site resolvido e Location opcional.",
       "conflict.device_prerequisites_required":
-        "O device não possui mapeamento de Site, Role, Manufacturer ou Device Type.",
+        "O device não possui mapeamento de Site, Role, Manufacturer, Device Type ou confirmação de modelo físico.",
       "conflict.interface_type_required":
         "A interface exige um tipo de interface do NetBox aprovado.",
       "conflict.circuit_prerequisites_required":
@@ -914,6 +928,11 @@ export const resources = {
       "show.identity": "Clave natural",
       "show.confirm_approve": "Revisé el diff y apruebo esta huella exacta",
       "show.approve": "Aprobar plan",
+      "show.preservation_title": "Datos preservados fuera de NetBox",
+      "show.preservation_help":
+        "Estos registros no se migrarán silenciosamente. Revise su tratamiento en el paquete auditable antes de aprobar.",
+      "show.confirm_preservation":
+        "Revisé y acepto las decisiones de preservación mostradas arriba",
       "show.applying": "Aplicando lote…",
       "show.resume": "Reanudar aplicación",
       "show.execution": "Ejecución #{{id}}",
@@ -1033,6 +1052,8 @@ export const resources = {
       "mapping.device_categories": "Requisitos por categoría de dispositivo",
       "mapping.device_help":
         "Cada categoría requiere Role, Manufacturer, Device Type físico y tipo de Interface.",
+      "mapping.confirm_physical_model":
+        "Confirmo que este fabricante y modelo físico son correctos. Los valores genéricos requieren confirmación.",
       "mapping.device_exceptions": "Excepciones individuales de dispositivos",
       "mapping.device_exceptions_help":
         "Sustituya el rol de la categoría, hardware o tipo de interfaz solo en los dispositivos que necesiten una excepción.",
@@ -1168,7 +1189,7 @@ export const resources = {
       "conflict.rack_site_required":
         "Un rack requiere un Site resuelto y una Location opcional.",
       "conflict.device_prerequisites_required":
-        "Al dispositivo le falta un mapeo de Site, Role, Manufacturer o Device Type.",
+        "Al dispositivo le falta un mapeo de Site, Role, Manufacturer, Device Type o confirmación de modelo físico.",
       "conflict.interface_type_required":
         "La interfaz requiere un tipo de interfaz de NetBox aprobado.",
       "conflict.circuit_prerequisites_required":

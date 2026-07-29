@@ -30,7 +30,13 @@ class BundleLocalizationTest extends TestCase
         $sourceFingerprint = SnapshotFingerprint::make([]);
         $targetFingerprint = SnapshotFingerprint::make([]);
         $mappingFingerprint = CanonicalJson::fingerprint($mapping);
-        $actions = [['operation' => 'create']];
+        $actions = [[
+            'operation' => 'create',
+            'target_type' => 'prefix',
+            'source_id' => 'prefix-1',
+            'natural_key' => ['prefix' => '10.10.0.0/24', 'vrf' => null],
+            'payload' => ['prefix' => '10.10.0.0/24', 'description' => 'Laboratory prefix'],
+        ]];
         $conflicts = [];
         $warnings = ['devices require mapping review before export to NetBox.'];
         $preservation = ['unmigrated' => ['devices' => [['id' => 1]]]];
@@ -76,8 +82,10 @@ class BundleLocalizationTest extends TestCase
         $report = json_decode((string) $zip->getFromName('report.json'), true, 512, JSON_THROW_ON_ERROR);
         $planJson = json_decode((string) $zip->getFromName('plan.json'), true, 512, JSON_THROW_ON_ERROR);
         $coverage = json_decode((string) $zip->getFromName('coverage.json'), true, 512, JSON_THROW_ON_ERROR);
+        $hierarchy = json_decode((string) $zip->getFromName('prefix-hierarchy.json'), true, 512, JSON_THROW_ON_ERROR);
         $references = json_decode((string) $zip->getFromName('proposed-references.json'), true, 512, JSON_THROW_ON_ERROR);
         $decisions = json_decode((string) $zip->getFromName('preservation-decisions.json'), true, 512, JSON_THROW_ON_ERROR);
+        $html = (string) $zip->getFromName('report.html');
         $zip->close();
 
         self::assertSame(2, $manifest['schema_version']);
@@ -88,6 +96,9 @@ class BundleLocalizationTest extends TestCase
         self::assertSame(1, $report['preservation']['categories']['unmigrated']);
         self::assertSame('create', $planJson['actions'][0]['operation']);
         self::assertSame(1, $coverage['operations']['create']);
+        self::assertSame(1, $hierarchy['schema_version']);
+        self::assertSame('10.10.0.0/24', $hierarchy['roots'][0]['prefix']);
+        self::assertStringContainsString('Hierarquia de prefixos', $html);
         self::assertSame(1, $references['schema_version']);
         self::assertSame(1, $decisions['schema_version']);
     }

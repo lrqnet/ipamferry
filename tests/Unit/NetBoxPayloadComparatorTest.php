@@ -42,4 +42,30 @@ class NetBoxPayloadComparatorTest extends TestCase
             'custom_fields.source' => ['expected' => 'phpIPAM', 'actual' => 'manual'],
         ], $differences);
     }
+
+    public function test_it_treats_netbox_null_empty_text_fields_as_equivalent(): void
+    {
+        $differences = (new NetBoxPayloadComparator)->differences([
+            'dns_name' => '',
+            'description' => '',
+        ], [
+            'dns_name' => null,
+            'description' => null,
+        ]);
+
+        self::assertSame([], $differences);
+    }
+
+    public function test_it_compares_netbox_canonical_dns_and_description_values(): void
+    {
+        $differences = (new NetBoxPayloadComparator)->differences([
+            'dns_name' => 'HOST.Example.Test.',
+            'description' => ' description ',
+        ], [
+            'dns_name' => 'host.example.test',
+            'description' => 'description',
+        ]);
+
+        self::assertSame([], $differences);
+    }
 }

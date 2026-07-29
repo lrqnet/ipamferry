@@ -8,14 +8,17 @@
     {"id": "vrf.identity-and-collision", "outcome": "blocked", "assertion": "Distinct VRFs permit duplicate prefixes; duplicate natural identities are conflicts; empty and duplicate RD behavior is explicit."},
     {"id": "vlan.boundaries-and-groups", "outcome": "preserved", "assertion": "VID 1 and 4094 migrate; 0, 4095 and non-numeric IDs are preserved before any destination request; duplicate VID is safe across groups."},
     {"id": "prefix.hierarchy-status-and-folders", "outcome": "migrated", "assertion": "Parent/child, pools, status, tags and utilized state migrate; phpIPAM folders are preserved."},
+    {"id": "bundle.prefix-hierarchy", "outcome": "migrated", "assertion": "The audit bundle emits a deterministic HTML and JSON prefix tree without source IDs, snapshots, or sensitive fields."},
     {"id": "ip.assignment-and-primary", "outcome": "migrated", "assertion": "Gateway, a valid DNS name, valid MAC/interface assignment and an unambiguous primary IP migrate; an invalid DNS name is preserved without blocking its IP, and a portless device IP is warned and remains unassigned."},
     {"id": "text.encoding-and-limits", "outcome": "rejected", "assertion": "Unicode, emoji, CRLF/LF, HTML and Markdown pass unchanged at the schema limit; over-limit and control characters block planning."},
     {"id": "custom-fields.types", "outcome": "blocked", "assertion": "Text, integer, boolean, date, selection, URL and JSON require compatible approved definitions; invalid/missing values block or preserve explicitly."},
     {"id": "tenancy-and-contacts", "outcome": "migrated", "assertion": "Customers migrate as tenants; contacts/roles require explicit approval; invalid contact data remains traceable."},
     {"id": "dcim.location-rack-device", "outcome": "blocked", "assertion": "Locations, racks, devices and interfaces require approved site, role, manufacturer, type and interface type; duplicate interfaces/MACs are conflicts."},
+    {"id": "dcim.generic-hardware-confirmation", "outcome": "blocked", "assertion": "Generic manufacturer or physical model values require explicit operator confirmation before Device, Manufacturer, or Device Type actions are created."},
     {"id": "circuits.terminations", "outcome": "blocked", "assertion": "Provider/type/circuit and safe A/Z terminations require approvals; incomplete, duplicate or ambiguous circuits do not partially migrate."},
     {"id": "nat.safety", "outcome": "preserved", "assertion": "Only an explicitly confirmed static 1:1 pair migrates; PAT, incomplete, many-to-many and cross-VRF cases remain preserved."},
     {"id": "target.drift-and-recovery", "outcome": "blocked", "assertion": "Reuse, opt-in PATCH, ETag drift, lost responses, checkpoint resume and repeated apply are safe and idempotent."},
+    {"id": "approval.preservation-acknowledgement", "outcome": "blocked", "assertion": "A plan with preserved records requires an explicit second operator acknowledgement that is validated server-side and recorded without source data."},
     {"id": "security.sanitization", "outcome": "rejected", "assertion": "SNMP secrets, API credentials, vaults, users, permissions and sessions never reach snapshots, plans, logs, reports or bundles."}
   ]
 }

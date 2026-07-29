@@ -15,7 +15,10 @@ final class DcimPlanner
         $classifications = is_array($locationSettings['locations'] ?? null) ? $locationSettings['locations'] : [];
         $fallback = is_array($locationSettings['fallback_site'] ?? null) ? $locationSettings['fallback_site'] : null;
 
-        if ($fallback !== null) {
+        $fallbackId = $fallback === null ? null : (string) ($fallback['id'] ?? 'fallback');
+        $fallbackIsClassifiedSite = $fallbackId !== null
+            && (($classifications[$fallbackId]['kind'] ?? null) === 'site');
+        if ($fallback !== null && ! $fallbackIsClassifiedSite) {
             $fallbackSource = $this->synthetic('mapping_site', (string) ($fallback['id'] ?? 'fallback'), $fallback);
             $intents[] = PlannerIntent::object(
                 'site',
@@ -110,24 +113,33 @@ final class DcimPlanner
         $deviceSettings = $policy->relationSettings('device_defaults') ?? [];
         $categories = is_array($deviceSettings['categories'] ?? null) ? $deviceSettings['categories'] : [];
         $overrides = is_array($deviceSettings['devices'] ?? null) ? $deviceSettings['devices'] : [];
+        $plannedManufacturers = [];
         foreach ($categories as $categoryId => $category) {
             if (! is_array($category)) {
                 continue;
             }
             $manufacturer = is_array($category['manufacturer'] ?? null) ? $category['manufacturer'] : null;
             $deviceType = is_array($category['device_type'] ?? null) ? $category['device_type'] : null;
+            if ($this->genericHardware($category) && ($category['hardware_confirmed'] ?? false) !== true) {
+                continue;
+            }
+            $manufacturerSourceId = null;
             if ($manufacturer !== null) {
-                $source = $this->synthetic('mapping_manufacturer', (string) $categoryId, $manufacturer);
                 $slug = $this->slug($manufacturer['slug'] ?? $manufacturer['name'] ?? '', 'phpipam-manufacturer-'.$categoryId);
-                $intents[] = PlannerIntent::object('manufacturer', $source, ['slug' => $slug], [
-                    'name' => (string) ($manufacturer['name'] ?? $slug),
-                    'slug' => $slug,
-                    'description' => (string) ($manufacturer['description'] ?? ''),
-                ], ($manufacturer['approved'] ?? false) === true);
+                $manufacturerSourceId = 'slug:'.$slug;
+                if (! isset($plannedManufacturers[$manufacturerSourceId])) {
+                    $source = $this->synthetic('mapping_manufacturer', $manufacturerSourceId, $manufacturer);
+                    $intents[] = PlannerIntent::object('manufacturer', $source, ['slug' => $slug], [
+                        'name' => (string) ($manufacturer['name'] ?? $slug),
+                        'slug' => $slug,
+                        'description' => (string) ($manufacturer['description'] ?? ''),
+                    ], ($manufacturer['approved'] ?? false) === true);
+                    $plannedManufacturers[$manufacturerSourceId] = true;
+                }
             }
             if ($deviceType !== null && $manufacturer !== null) {
                 $source = $this->synthetic('mapping_device_type', (string) $categoryId, $deviceType);
-                $manufacturerRef = PlannerIntent::reference('manufacturer', (string) $categoryId);
+                $manufacturerRef = PlannerIntent::reference('manufacturer', $manufacturerSourceId);
                 $slug = $this->slug($deviceType['slug'] ?? $deviceType['model'] ?? '', 'phpipam-device-type-'.$categoryId);
                 $intents[] = PlannerIntent::object('device_type', $source, [
                     'manufacturer_id' => $manufacturerRef,
@@ -166,12 +178,19 @@ final class DcimPlanner
             if (! is_array($settings['device_type'] ?? null)) {
                 $missing[] = 'device_type';
             }
+            if ($this->genericHardware($settings) && ($settings['hardware_confirmed'] ?? false) !== true) {
+                $missing[] = 'confirmed_physical_model';
+            }
             if ($missing !== []) {
                 $intents[] = PlannerIntent::issue('device_prerequisites_required', 'device', $sourceId, ['missing' => $missing]);
 
                 continue;
             }
-            $manufacturerSourceId = $categoryId;
+            $manufacturerSourceId = $this->slug(
+                $settings['manufacturer']['slug'] ?? $settings['manufacturer']['name'] ?? '',
+                'phpipam-manufacturer-'.$categoryId,
+            );
+            $manufacturerSourceId = 'slug:'.$manufacturerSourceId;
             $deviceTypeSourceId = $categoryId;
             if (array_key_exists('manufacturer', $override)) {
                 $manufacturerSourceId = "device:{$sourceId}";
@@ -262,6 +281,20 @@ final class DcimPlanner
         }
 
         return $intents;
+    }
+
+    private function genericHardware(array $settings): bool
+    {
+        $manufacturer = is_array($settings['manufacturer'] ?? null) ? $settings['manufacturer'] : [];
+        $deviceType = is_array($settings['device_type'] ?? null) ? $settings['device_type'] : [];
+        $values = [
+            $manufacturer['name'] ?? null,
+            $manufacturer['slug'] ?? null,
+            $deviceType['model'] ?? null,
+            $deviceType['slug'] ?? null,
+        ];
+
+        return collect($values)->contains(fn (mixed $value): bool => is_string($value) && str_contains(mb_strtolower($value), 'generic'));
     }
 
     public function classification(array $objects, MappingPolicy $policy): array
