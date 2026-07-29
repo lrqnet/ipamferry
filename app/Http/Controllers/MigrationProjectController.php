@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Domain\Migration\BundleBuilder;
 use App\Domain\Migration\CanonicalJson;
 use App\Domain\Migration\EndpointPolicy;
+use App\Domain\Migration\MappingCatalog;
 use App\Domain\Migration\MappingPolicy;
 use App\Domain\Migration\MigrationApplier;
 use App\Domain\Migration\MigrationAudit;
@@ -55,7 +56,7 @@ class MigrationProjectController extends Controller
             'locale' => $data['locale'] ?? app()->getLocale(),
             'created_by' => $request->user()->id,
             'status' => MigrationProjectStatus::Draft,
-            'mapping' => MappingPolicy::defaults(),
+            'mapping' => MappingPolicy::v2Defaults(),
         ]);
         $audit->record($project, 'project.created', [
             'source_kind' => $project->source_kind,
@@ -103,6 +104,7 @@ class MigrationProjectController extends Controller
                 'conflict_count' => count($latestPlan->conflicts),
                 'conflicts' => array_slice($latestPlan->conflicts, 0, 500),
                 'warnings' => array_slice($latestPlan->warnings, 0, 500),
+                'preservation_summary' => $this->preservationSummary($latestPlan->preservation),
                 'actions_truncated' => count($latestPlan->actions) > 500,
                 'conflicts_truncated' => count($latestPlan->conflicts) > 500,
                 'warnings_truncated' => count($latestPlan->warnings) > 500,
@@ -124,10 +126,47 @@ class MigrationProjectController extends Controller
         ]);
     }
 
+    public function updateArtifactLocale(
+        Request $request,
+        MigrationProject $project,
+        MigrationAudit $audit,
+        MigrationOperationLock $operations,
+    ): RedirectResponse {
+        $data = $request->validate([
+            'locale' => ['required', 'in:'.implode(',', SupportedLocale::values())],
+        ]);
+
+        try {
+            $lock = $operations->acquire($project);
+            $operations->assertDefinitionMutable($project);
+            if ($project->locale === $data['locale']) {
+                return back()->with('success', 'Artifact language is already up to date.');
+            }
+            $project->update([
+                'locale' => $data['locale'],
+                'status' => $project->source_snapshot === null
+                    ? MigrationProjectStatus::Draft
+                    : MigrationProjectStatus::Discovered,
+            ]);
+            $audit->record($project, 'project.artifact_locale.updated', [
+                'locale' => $project->locale,
+            ], $request->user()->id);
+        } catch (Throwable $exception) {
+            return back()->withErrors(['migration' => $exception->getMessage()]);
+        } finally {
+            if (isset($lock)) {
+                $lock->release();
+            }
+        }
+
+        return back()->with('success', 'Artifact language updated. Generate a new plan to use it.');
+    }
+
     public function discover(
         Request $request,
         MigrationProject $project,
         SourceNormalizer $normalizer,
+        MappingCatalog $catalog,
         MigrationAudit $audit,
         MigrationOperationLock $operations,
         SandboxConnection $sandbox,
@@ -166,7 +205,7 @@ class MigrationProjectController extends Controller
                 $data['phpipam_token'],
             ))->inventory();
             $targetInventory = (new NetBoxClient($targetConnection['url'], $targetConnection['token']))->inventory();
-            $this->storeDiscovery($project, $normalizer->normalize($sourceInventory), $targetInventory);
+            $this->storeDiscovery($project, $normalizer->normalize($sourceInventory), $targetInventory, $catalog);
             $audit->record(
                 $project,
                 'discovery.completed',
@@ -187,6 +226,7 @@ class MigrationProjectController extends Controller
         MigrationProject $project,
         SqlDumpParser $parser,
         SourceNormalizer $normalizer,
+        MappingCatalog $catalog,
         MigrationAudit $audit,
         MigrationOperationLock $operations,
         SandboxConnection $sandbox,
@@ -227,7 +267,7 @@ class MigrationProjectController extends Controller
             }
             $parsed = $parser->parseFile(Storage::disk('local')->path($stored));
             $sourceInventory = [
-                'schema_version' => 1,
+                'schema_version' => 2,
                 'instance' => [
                     'kind' => 'phpipam_dump',
                     'filename_hash' => hash_file('sha256', Storage::disk('local')->path($stored)),
@@ -238,7 +278,7 @@ class MigrationProjectController extends Controller
                 'warnings' => $parsed['_warnings'] ?? [],
             ];
             $targetInventory = (new NetBoxClient($targetConnection['url'], $targetConnection['token']))->inventory();
-            $this->storeDiscovery($project, $normalizer->normalize($sourceInventory), $targetInventory);
+            $this->storeDiscovery($project, $normalizer->normalize($sourceInventory), $targetInventory, $catalog);
             $audit->record(
                 $project,
                 'discovery.completed',
@@ -311,6 +351,11 @@ class MigrationProjectController extends Controller
         MigrationOperationLock $operations,
     ): RedirectResponse {
         abort_if($project->source_snapshot === null || $project->target_snapshot === null, 422, 'Run discovery before planning.');
+        abort_if(
+            $project->status === MigrationProjectStatus::Verified,
+            422,
+            'Refresh the NetBox target before generating a sibling plan.',
+        );
         try {
             $lock = $operations->acquire($project);
             $operations->assertDefinitionMutable($project);
@@ -338,6 +383,10 @@ class MigrationProjectController extends Controller
     ): RedirectResponse {
         $this->assertPlan($project, $plan);
         $request->validate(['confirm' => ['accepted']]);
+        $preservation = $this->preservationSummary($plan->preservation);
+        if (array_sum($preservation) > 0) {
+            $request->validate(['preservation_acknowledged' => ['accepted']]);
+        }
         try {
             $lock = $operations->acquire($project);
             $operations->assertPlanOperationAllowed($project, $plan);
@@ -345,6 +394,15 @@ class MigrationProjectController extends Controller
             $approvedNow = $plan->approve($request->user());
             $project->update(['status' => MigrationProjectStatus::Approved]);
             if ($approvedNow) {
+                if ($preservation !== []) {
+                    $audit->record(
+                        $project,
+                        'plan.preservation_acknowledged',
+                        ['categories' => $preservation],
+                        $request->user()->id,
+                        $plan->id,
+                    );
+                }
                 $audit->record(
                     $project,
                     'plan.approved',
@@ -461,6 +519,7 @@ class MigrationProjectController extends Controller
         MigrationAudit $audit,
         MigrationOperationLock $operations,
         SandboxConnection $sandbox,
+        MappingCatalog $catalog,
     ): RedirectResponse {
         abort_if($project->source_snapshot === null, 422, 'Run source discovery before changing the target.');
         $rules = ['use_sandbox' => ['sometimes', 'boolean']];
@@ -479,6 +538,7 @@ class MigrationProjectController extends Controller
             $manifest = $project->discovery_manifest ?? [];
             $project->update([
                 'target_snapshot' => $target,
+                'mapping_catalog' => $catalog->build($project->source_snapshot ?? [], $target),
                 'target_instance' => $targetInstance,
                 'discovery_manifest' => [
                     ...$manifest,
@@ -509,24 +569,28 @@ class MigrationProjectController extends Controller
         }
     }
 
-    private function storeDiscovery(MigrationProject $project, array $source, array $target): void
+    private function storeDiscovery(MigrationProject $project, array $source, array $target, MappingCatalog $catalog): void
     {
         $sourceInstance = $source['instance'] ?? [];
         $targetInstance = $target['instance'] ?? [];
         $project->update([
             'source_snapshot' => $source,
             'target_snapshot' => $target,
+            'mapping_catalog' => $catalog->build($source, $target),
             'source_instance' => $sourceInstance,
             'target_instance' => $targetInstance,
             'discovery_manifest' => [
-                'schema_version' => 1,
+                'schema_version' => 2,
                 'source_fingerprint' => SnapshotFingerprint::make($source),
                 'target_fingerprint' => SnapshotFingerprint::make($target),
                 'source_counts' => $this->counts($source['objects'] ?? []),
                 'target_counts' => $this->counts($target['objects'] ?? []),
                 'discovered_at' => now()->toIso8601String(),
             ],
-            'snapshot_schema_version' => 1,
+            'snapshot_schema_version' => max(
+                (int) ($source['schema_version'] ?? 1),
+                (int) ($target['schema_version'] ?? 1),
+            ),
             'status' => MigrationProjectStatus::Discovered,
             'last_error' => null,
         ]);
@@ -587,5 +651,27 @@ class MigrationProjectController extends Controller
         return $request->boolean('use_sandbox')
             ? $sandbox->credentials()
             : ['url' => $data['netbox_url'], 'token' => $data['netbox_token']];
+    }
+
+    private function preservationSummary(array $preservation): array
+    {
+        $summary = [];
+        foreach ($preservation as $category => $value) {
+            if (in_array($category, ['decisions', 'source_records', 'ignored'], true)) {
+                continue;
+            }
+            if (! is_array($value)) {
+                continue;
+            }
+            $count = array_is_list($value)
+                ? count($value)
+                : array_sum(array_map(fn (mixed $items): int => is_array($items) ? count($items) : 1, $value));
+            if ($count > 0) {
+                $summary[(string) $category] = $count;
+            }
+        }
+        ksort($summary, SORT_STRING);
+
+        return $summary;
     }
 }

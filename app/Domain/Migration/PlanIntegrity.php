@@ -31,6 +31,9 @@ class PlanIntegrity
             'warnings' => $plan->warnings,
             'preservation' => $plan->preservation,
         ];
+        if ($plan->schema_version >= 3) {
+            $result['schema_version'] = $plan->schema_version;
+        }
         $fingerprintInput = [
             'schema_version' => $plan->schema_version,
             'engine_version' => $plan->engine_version,

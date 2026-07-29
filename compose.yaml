@@ -1,15 +1,16 @@
 name: ipamferry
 
 x-ipamferry-image: &ipamferry-image
-  image: ${IPAMFERRY_IMAGE:-docker.io/lrqnet/ipamferry:0.1.0}
+  image: ${IPAMFERRY_IMAGE:-docker.io/lrqnet/ipamferry:0.2.0}
 
 x-ipamferry-environment: &ipamferry-environment
   APP_ENV: production
-  APP_DEBUG: 'false'
+  APP_DEBUG: "false"
   IPAMFERRY_SANDBOX_URL: http://sandbox-netbox:8080
+  IPAMFERRY_SANDBOX_TOKEN_FORMAT: ${IPAMFERRY_SANDBOX_TOKEN_FORMAT:-v2}
   DB_CONNECTION: pgsql
   DB_HOST: postgres
-  DB_PORT: '5432'
+  DB_PORT: "5432"
   DB_DATABASE: ipamferry
   DB_USERNAME: ipamferry
 
@@ -35,15 +36,29 @@ services:
     restart: unless-stopped
     read_only: true
     security_opt: ["no-new-privileges:true"]
-    depends_on: {init: {condition: service_completed_successfully}}
+    depends_on: { init: { condition: service_completed_successfully } }
     environment:
       POSTGRES_DB: postgres
       POSTGRES_USER: ipamferry_admin
       POSTGRES_PASSWORD_FILE: /run/ipamferry-recovery-secrets/postgres_admin_password
       PGDATA: /var/lib/postgresql/data
-    volumes: ["postgres_data:/var/lib/postgresql", "ipamferry_recovery_secrets:/run/ipamferry-recovery-secrets:ro"]
-    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=64m", "/var/run/postgresql:rw,nosuid,nodev,size=16m"]
-    healthcheck: {test: ["CMD-SHELL", "pg_isready -U ipamferry_admin -d postgres"], interval: 5s, timeout: 5s, retries: 30}
+    volumes:
+      [
+        "postgres_data:/var/lib/postgresql",
+        "ipamferry_recovery_secrets:/run/ipamferry-recovery-secrets:ro",
+      ]
+    tmpfs:
+      [
+        "/tmp:rw,noexec,nosuid,nodev,size=64m",
+        "/var/run/postgresql:rw,nosuid,nodev,size=16m",
+      ]
+    healthcheck:
+      {
+        test: ["CMD-SHELL", "pg_isready -U ipamferry_admin -d postgres"],
+        interval: 5s,
+        timeout: 5s,
+        retries: 30,
+      }
     networks: [internal]
   database-init:
     <<: *ipamferry-image
@@ -52,9 +67,14 @@ services:
     read_only: true
     user: "0:0"
     security_opt: ["no-new-privileges:true"]
-    depends_on: {postgres: {condition: service_healthy}}
+    depends_on: { postgres: { condition: service_healthy } }
     environment: *ipamferry-environment
-    volumes: ["ipamferry_secrets:/run/ipamferry-secrets:ro", "ipamferry_recovery_secrets:/run/ipamferry-recovery-secrets:ro", "ipamferry_cache:/app/bootstrap/cache"]
+    volumes:
+      [
+        "ipamferry_secrets:/run/ipamferry-secrets:ro",
+        "ipamferry_recovery_secrets:/run/ipamferry-recovery-secrets:ro",
+        "ipamferry_cache:/app/bootstrap/cache",
+      ]
     networks: [internal]
   app:
     <<: *ipamferry-image
@@ -63,10 +83,18 @@ services:
     user: "20000:20000"
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
-    depends_on: {database-init: {condition: service_completed_successfully}}
+    depends_on: { database-init: { condition: service_completed_successfully } }
     environment: *ipamferry-environment
-    volumes: ["ipamferry_secrets:/run/ipamferry-secrets:ro", "ipamferry_storage:/app/storage", "ipamferry_cache:/app/bootstrap/cache", "caddy_data:/data", "caddy_config:/config"]
-    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=64m,uid=20000,gid=20000,mode=1700"]
+    volumes:
+      [
+        "ipamferry_secrets:/run/ipamferry-secrets:ro",
+        "ipamferry_storage:/app/storage",
+        "ipamferry_cache:/app/bootstrap/cache",
+        "caddy_data:/data",
+        "caddy_config:/config",
+      ]
+    tmpfs:
+      ["/tmp:rw,noexec,nosuid,nodev,size=64m,uid=20000,gid=20000,mode=1700"]
     ports:
       - target: 8080
         published: "${IPAMFERRY_HTTP_PORT:-80}"
@@ -91,10 +119,16 @@ services:
     security_opt: ["no-new-privileges:true"]
     healthcheck:
       disable: true
-    depends_on: {database-init: {condition: service_completed_successfully}}
+    depends_on: { app: { condition: service_healthy } }
     environment: *ipamferry-environment
-    volumes: ["ipamferry_secrets:/run/ipamferry-secrets:ro", "ipamferry_storage:/app/storage", "ipamferry_cache:/app/bootstrap/cache"]
-    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=64m,uid=20000,gid=20000,mode=1700"]
+    volumes:
+      [
+        "ipamferry_secrets:/run/ipamferry-secrets:ro",
+        "ipamferry_storage:/app/storage",
+        "ipamferry_cache:/app/bootstrap/cache",
+      ]
+    tmpfs:
+      ["/tmp:rw,noexec,nosuid,nodev,size=64m,uid=20000,gid=20000,mode=1700"]
     networks: [internal, egress]
   scheduler:
     <<: *ipamferry-image
@@ -106,10 +140,16 @@ services:
     security_opt: ["no-new-privileges:true"]
     healthcheck:
       disable: true
-    depends_on: {database-init: {condition: service_completed_successfully}}
+    depends_on: { app: { condition: service_healthy } }
     environment: *ipamferry-environment
-    volumes: ["ipamferry_secrets:/run/ipamferry-secrets:ro", "ipamferry_storage:/app/storage", "ipamferry_cache:/app/bootstrap/cache"]
-    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=64m,uid=20000,gid=20000,mode=1700"]
+    volumes:
+      [
+        "ipamferry_secrets:/run/ipamferry-secrets:ro",
+        "ipamferry_storage:/app/storage",
+        "ipamferry_cache:/app/bootstrap/cache",
+      ]
+    tmpfs:
+      ["/tmp:rw,noexec,nosuid,nodev,size=64m,uid=20000,gid=20000,mode=1700"]
     networks: [internal]
   sandbox-netbox:
     profiles: ["sandbox"]
@@ -123,7 +163,7 @@ services:
       - /bin/bash
       - -ec
       - |
-        ./manage.py shell --no-startup --no-imports --interface python -c "from users.choices import TokenVersionChoices; from users.models import Token, User; key=open('/run/secrets/superuser_api_key', encoding='utf-8').read().strip(); token=open('/run/secrets/superuser_api_token', encoding='utf-8').read().strip(); user=User.objects.get(username='ipamferry'); Token.objects.filter(key=key).delete(); Token.objects.create(user=user, token=token, version=TokenVersionChoices.V2, key=key)"
+        ./manage.py shell --no-startup --no-imports --interface python -c "from users.models import Token, User; key=open('/run/secrets/superuser_api_key', encoding='utf-8').read().strip(); token=open('/run/secrets/superuser_api_token', encoding='utf-8').read().strip(); user=User.objects.get(username='ipamferry'); legacy='IPAMFERRY_SANDBOX_TOKEN_FORMAT' in __import__('os').environ and __import__('os').environ['IPAMFERRY_SANDBOX_TOKEN_FORMAT'] == 'legacy'; Token.objects.filter(key=(token if legacy else key)).delete(); Token.objects.create(user=user, **({'key': token, 'write_enabled': True} if legacy else {'token': token, 'key': key, 'version': __import__('users.choices', fromlist=['TokenVersionChoices']).TokenVersionChoices.V2}))"
         exec /opt/netbox/launch-netbox.sh
     environment:
       ALLOWED_HOSTS: "*"
@@ -141,10 +181,19 @@ services:
       SKIP_SUPERUSER: "false"
       SUPERUSER_NAME: ipamferry
       SUPERUSER_EMAIL: sandbox@example.invalid
+      IPAMFERRY_SANDBOX_TOKEN_FORMAT: ${IPAMFERRY_SANDBOX_TOKEN_FORMAT:-v2}
     volumes: ["ipamferry_secrets:/run/secrets:ro"]
-    depends_on: {sandbox-postgres: {condition: service_healthy}, sandbox-redis: {condition: service_healthy}}
+    depends_on:
+      {
+        sandbox-postgres: { condition: service_healthy },
+        sandbox-redis: { condition: service_healthy },
+      }
     healthcheck:
-      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8080/login/"]
+      test:
+        [
+          "CMD-SHELL",
+          'if [ "$${IPAMFERRY_SANDBOX_TOKEN_FORMAT:-v2}" = legacy ]; then header="Authorization: Token $$(cat /run/secrets/superuser_api_token)"; else header="Authorization: Bearer nbt_$$(cat /run/secrets/superuser_api_key).$$(cat /run/secrets/superuser_api_token)"; fi; curl --fail --silent --header "$$header" http://localhost:8080/api/status/ >/dev/null',
+        ]
       interval: 15s
       timeout: 20s
       retries: 40
@@ -158,15 +207,29 @@ services:
     user: "999:999"
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
-    depends_on: {init: {condition: service_completed_successfully}}
+    depends_on: { init: { condition: service_completed_successfully } }
     environment:
       POSTGRES_DB: netbox
       POSTGRES_USER: netbox
       POSTGRES_PASSWORD_FILE: /run/secrets/db_password
       PGDATA: /var/lib/postgresql/data
-    volumes: ["ipamferry_secrets:/run/secrets:ro", "sandbox_postgres_data:/var/lib/postgresql"]
-    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777", "/var/run/postgresql:rw,nosuid,nodev,size=16m,uid=999,gid=999,mode=0775"]
-    healthcheck: {test: ["CMD-SHELL", "pg_isready -U netbox -d netbox"], interval: 5s, timeout: 5s, retries: 20}
+    volumes:
+      [
+        "ipamferry_secrets:/run/secrets:ro",
+        "sandbox_postgres_data:/var/lib/postgresql",
+      ]
+    tmpfs:
+      [
+        "/tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777",
+        "/var/run/postgresql:rw,nosuid,nodev,size=16m,uid=999,gid=999,mode=0775",
+      ]
+    healthcheck:
+      {
+        test: ["CMD-SHELL", "pg_isready -U netbox -d netbox"],
+        interval: 5s,
+        timeout: 5s,
+        retries: 20,
+      }
     networks: [sandbox_internal]
   sandbox-redis:
     profiles: ["sandbox"]
@@ -175,20 +238,39 @@ services:
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
-    depends_on: {init: {condition: service_completed_successfully}}
-    command: ["/bin/sh", "-c", "exec redis-server --save '' --requirepass \"$$(cat /run/secrets/redis_password)\""]
+    depends_on: { init: { condition: service_completed_successfully } }
+    command:
+      [
+        "/bin/sh",
+        "-c",
+        'exec redis-server --save '''' --requirepass "$$(cat /run/secrets/redis_password)"',
+      ]
     volumes: ["ipamferry_secrets:/run/secrets:ro"]
     tmpfs: ["/data:rw,noexec,nosuid,nodev,size=64m"]
     healthcheck:
-      test: ["CMD-SHELL", "redis-cli --no-auth-warning -a \"$$(cat /run/secrets/redis_password)\" ping | grep -q PONG"]
+      test:
+        [
+          "CMD-SHELL",
+          'redis-cli --no-auth-warning -a "$$(cat /run/secrets/redis_password)" ping | grep -q PONG',
+        ]
       interval: 5s
       timeout: 5s
       retries: 20
     networks: [sandbox_internal]
 
-volumes: {postgres_data: {}, sandbox_postgres_data: {}, ipamferry_secrets: {}, ipamferry_recovery_secrets: {}, ipamferry_storage: {}, ipamferry_cache: {}, caddy_data: {}, caddy_config: {}}
+volumes:
+  {
+    postgres_data: {},
+    sandbox_postgres_data: {},
+    ipamferry_secrets: {},
+    ipamferry_recovery_secrets: {},
+    ipamferry_storage: {},
+    ipamferry_cache: {},
+    caddy_data: {},
+    caddy_config: {},
+  }
 networks:
   edge: {}
-  internal: {internal: true}
+  internal: { internal: true }
   egress: {}
-  sandbox_internal: {internal: true}
+  sandbox_internal: { internal: true }

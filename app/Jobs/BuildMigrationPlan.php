@@ -76,8 +76,9 @@ class BuildMigrationPlan implements ShouldBeUnique, ShouldQueue
                 $mapping,
                 $identityLinks,
             );
+            $planSchema = (new MappingPolicy($mapping))->schemaVersion() === 2 ? 3 : 2;
             $fingerprint = CanonicalJson::fingerprint([
-                'schema_version' => 2,
+                'schema_version' => $planSchema,
                 'engine_version' => config('ipamferry.version'),
                 'source' => $sourceFingerprint,
                 'target' => $targetFingerprint,
@@ -90,7 +91,7 @@ class BuildMigrationPlan implements ShouldBeUnique, ShouldQueue
             $plan = MigrationPlan::query()->firstOrCreate(
                 ['project_id' => $project->id, 'fingerprint' => $fingerprint],
                 [
-                    'schema_version' => 2,
+                    'schema_version' => $planSchema,
                     'engine_version' => config('ipamferry.version'),
                     'locale' => $project->locale,
                     'source_fingerprint' => $sourceFingerprint,

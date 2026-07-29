@@ -9,13 +9,16 @@
     "format:check": "prettier --check resources/ '*.{json,md,yaml,yml}'",
     "types:check": "tsc --noEmit",
     "translations:check": "tsx scripts/check-translations.ts",
-    "test:e2e:chromium": "playwright test --project=chromium",
-    "test:e2e:all": "playwright test"
+    "docs:check": "tsx scripts/check-public-docs.ts",
+    "test:e2e:chromium": "./scripts/e2e-test.sh chromium",
+    "test:e2e:all": "./scripts/e2e-test.sh all"
   },
   "dependencies": {
+    "@codemirror/lang-json": "^6.0.2",
     "@inertiajs/react": "^3.0.0",
     "@inertiajs/vite": "^3.0.0",
     "@tailwindcss/vite": "^4.0.0",
+    "@uiw/react-codemirror": "^4.25.11",
     "@vitejs/plugin-react": "^5.0.0",
     "axios": "^1.8.0",
     "i18next": "^26.3.6",

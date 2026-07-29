@@ -1,0 +1,39 @@
+name: external-anonymized-dump-validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      acknowledge_sensitive_corpus:
+        description: "I confirm the configured corpus is anonymized and approved for this protected run"
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    if: inputs.acknowledge_sensitive_corpus
+    environment: external-corpus-validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with: {persist-credentials: false}
+      - name: Materialize protected corpus
+        env:
+          DUMP_B64: ${{ secrets.IPAMFERRY_EXTERNAL_DUMP_B64 }}
+          MAPPING_B64: ${{ secrets.IPAMFERRY_EXTERNAL_MAPPING_B64 }}
+        run: |
+          set -Eeuo pipefail
+          test -n "$DUMP_B64"
+          test -n "$MAPPING_B64"
+          corpus_dir="$(mktemp -d)"
+          chmod 700 "$corpus_dir"
+          trap 'shred -u "$corpus_dir/source.sql" "$corpus_dir/mapping.json" 2>/dev/null || true; rmdir "$corpus_dir" 2>/dev/null || true' EXIT
+          printf '%s' "$DUMP_B64" | base64 --decode > "$corpus_dir/source.sql"
+          printf '%s' "$MAPPING_B64" | base64 --decode > "$corpus_dir/mapping.json"
+          test -s "$corpus_dir/source.sql"
+          test -s "$corpus_dir/mapping.json"
+          ./scripts/lab-external-dump.sh "$corpus_dir/source.sql" "$corpus_dir/mapping.json"

@@ -12,7 +12,9 @@ class MappingPolicy
 
     public function __construct(array $mapping)
     {
-        $this->mapping = array_replace_recursive(self::defaults(), $mapping);
+        $this->mapping = ($mapping['schema_version'] ?? 1) === 2
+            ? array_replace(self::v2Defaults(), $mapping)
+            : array_replace_recursive(self::defaults(), $mapping);
     }
 
     public static function defaults(): array
@@ -36,20 +38,159 @@ class MappingPolicy
         ];
     }
 
+    public static function v2Defaults(): array
+    {
+        return [
+            'schema_version' => 2,
+            'object_policies' => [
+                'vrf' => ['policy' => 'migrate', 'target_type' => 'vrf'],
+                'vlan_group' => ['policy' => 'migrate', 'target_type' => 'vlan_group'],
+                'vlan' => ['policy' => 'migrate', 'target_type' => 'vlan'],
+                'prefix' => ['policy' => 'migrate', 'target_type' => 'prefix'],
+                'ip_address' => ['policy' => 'migrate', 'target_type' => 'ip_address'],
+            ],
+            'reference_rules' => [],
+            'status_rules' => [
+                ['id' => 'status-ip-default', 'source_type' => 'ip_address', 'source_value' => '*', 'target_value' => 'active'],
+                ['id' => 'status-prefix-default', 'source_type' => 'prefix', 'source_value' => '*', 'target_value' => 'active'],
+                ['id' => 'status-vlan-default', 'source_type' => 'vlan', 'source_value' => '*', 'target_value' => 'active'],
+            ],
+            'update_rules' => [
+                'vrf' => [],
+                'vlan_group' => [],
+                'vlan' => [],
+                'prefix' => [],
+                'ip_address' => [],
+            ],
+            'field_rules' => [],
+            'relation_rules' => [],
+            'preservation_rules' => [],
+        ];
+    }
+
+    public function schemaVersion(): int
+    {
+        return (int) ($this->mapping['schema_version'] ?? 1);
+    }
+
+    public function upgraded(): array
+    {
+        if ($this->schemaVersion() === 2) {
+            return $this->canonicalize($this->mapping);
+        }
+
+        $upgraded = self::v2Defaults();
+        foreach ($this->sourceTypes() as $sourceType) {
+            if ($this->ignores($sourceType)) {
+                $upgraded['object_policies'][$sourceType] = [
+                    'policy' => 'ignore',
+                    'target_type' => $sourceType,
+                ];
+            }
+        }
+        $upgraded['status_rules'] = [];
+        foreach (($this->mapping['statuses'] ?? []) as $sourceType => $rules) {
+            if (! is_array($rules)) {
+                continue;
+            }
+            foreach ($rules as $sourceValue => $targetValue) {
+                $upgraded['status_rules'][] = [
+                    'id' => $this->ruleId('status', [
+                        'source_type' => $sourceType,
+                        'source_value' => (string) $sourceValue,
+                        'target_value' => $targetValue,
+                    ]),
+                    'source_type' => $sourceType,
+                    'source_value' => (string) $sourceValue,
+                    'target_value' => $targetValue,
+                ];
+            }
+        }
+        $upgraded['update_rules'] = array_replace($upgraded['update_rules'], $this->mapping['updates'] ?? []);
+        foreach ($this->mapping['custom_fields'] ?? [] as $rule) {
+            if (! is_array($rule)) {
+                continue;
+            }
+            $upgraded['field_rules'][] = [
+                'id' => $this->ruleId('field', $rule),
+                'target_kind' => 'custom_field',
+                ...$rule,
+            ];
+        }
+
+        return $this->canonicalize($upgraded);
+    }
+
     public function all(): array
     {
-        return $this->mapping;
+        return $this->schemaVersion() === 2
+            ? $this->canonicalize($this->mapping)
+            : $this->mapping;
     }
 
     public function ignores(string $sourceType): bool
     {
+        if ($this->schemaVersion() === 2) {
+            return $this->objectPolicy($sourceType) === 'ignore';
+        }
         $ignored = $this->mapping['ignore_types'] ?? [];
 
         return is_array($ignored) && in_array($sourceType, $ignored, true);
     }
 
+    public function objectPolicy(string $sourceType): string
+    {
+        $policy = $this->mapping['object_policies'][$sourceType]['policy'] ?? 'preserve';
+
+        return in_array($policy, ['migrate', 'ignore', 'preserve'], true) ? $policy : 'preserve';
+    }
+
+    public function migrates(string $sourceType): bool
+    {
+        return $this->schemaVersion() === 1
+            ? ! $this->ignores($sourceType)
+            : $this->objectPolicy($sourceType) === 'migrate';
+    }
+
+    public function relationSettings(string $relation): ?array
+    {
+        foreach ($this->mapping['relation_rules'] ?? [] as $rule) {
+            if (is_array($rule)
+                && ($rule['relation'] ?? null) === $relation
+                && ($rule['enabled'] ?? false) === true
+            ) {
+                return is_array($rule['settings'] ?? null) ? $rule['settings'] : [];
+            }
+        }
+
+        return null;
+    }
+
+    public function preservationRules(): array
+    {
+        $rules = $this->mapping['preservation_rules'] ?? [];
+
+        return is_array($rules) ? $rules : [];
+    }
+
     public function status(string $targetType, mixed $sourceStatus): string
     {
+        if ($this->schemaVersion() === 2) {
+            $fallback = 'active';
+            foreach ($this->mapping['status_rules'] ?? [] as $rule) {
+                if (! is_array($rule) || ($rule['source_type'] ?? null) !== $targetType) {
+                    continue;
+                }
+                if (($rule['source_value'] ?? '*') === '*') {
+                    $fallback = (string) ($rule['target_value'] ?? $fallback);
+                }
+                if ((string) ($rule['source_value'] ?? '') === (string) $sourceStatus) {
+                    return (string) $rule['target_value'];
+                }
+            }
+
+            return $fallback;
+        }
         $statuses = $this->mapping['statuses'] ?? [];
         $mapping = is_array($statuses) ? ($statuses[$targetType] ?? ['default' => 'active']) : ['default' => 'active'];
         if (! is_array($mapping)) {
@@ -64,7 +205,7 @@ class MappingPolicy
 
     public function allowedUpdates(string $targetType): array
     {
-        $updates = $this->mapping['updates'] ?? [];
+        $updates = $this->mapping[$this->schemaVersion() === 2 ? 'update_rules' : 'updates'] ?? [];
         $fields = is_array($updates) ? ($updates[$targetType] ?? []) : [];
 
         return is_array($fields) ? array_values(array_filter($fields, 'is_string')) : [];
@@ -77,11 +218,26 @@ class MappingPolicy
 
     public function customFieldResult(string $sourceType, array $legacy): array
     {
+        return $this->transformationResult($sourceType, $legacy, true);
+    }
+
+    public function fieldResult(string $sourceType, array $source): array
+    {
+        return $this->transformationResult($sourceType, $source, false);
+    }
+
+    private function transformationResult(string $sourceType, array $legacy, bool $customFields): array
+    {
         $data = [];
         $errors = [];
-        $rules = $this->mapping['custom_fields'] ?? [];
+        $rules = $this->mapping[$this->schemaVersion() === 2 ? 'field_rules' : 'custom_fields'] ?? [];
         foreach (is_array($rules) ? $rules : [] as $index => $rule) {
             if (! is_array($rule) || ($rule['source_type'] ?? null) !== $sourceType) {
+                continue;
+            }
+            if ($this->schemaVersion() === 2
+                && (($rule['target_kind'] ?? 'field') === 'custom_field') !== $customFields
+            ) {
                 continue;
             }
 
@@ -105,6 +261,10 @@ class MappingPolicy
             }
 
             [$valid, $converted] = $this->convertValue($value, (string) ($rule['data_type'] ?? 'text'));
+            if ($valid && ($rule['data_type'] ?? 'text') === 'select') {
+                $choices = $rule['choice_set']['choices'] ?? [];
+                $valid = is_array($choices) && in_array($converted, $choices, true);
+            }
             if (! $valid) {
                 $errors[] = [
                     'rule' => $index,
@@ -122,12 +282,41 @@ class MappingPolicy
 
     public function customFieldRules(): array
     {
-        $rules = $this->mapping['custom_fields'] ?? [];
+        $rules = $this->mapping[$this->schemaVersion() === 2 ? 'field_rules' : 'custom_fields'] ?? [];
 
-        return is_array($rules) ? array_values(array_filter($rules, 'is_array')) : [];
+        return is_array($rules) ? array_values(array_filter(
+            $rules,
+            fn (mixed $rule): bool => is_array($rule)
+                && ($this->schemaVersion() === 1 || ($rule['target_kind'] ?? 'field') === 'custom_field'),
+        )) : [];
     }
 
     public function validate(): array
+    {
+        if ($this->schemaVersion() === 2) {
+            return array_column($this->validationIssues(), 'message');
+        }
+
+        return $this->validateV1();
+    }
+
+    public function validationIssues(): array
+    {
+        if ($this->schemaVersion() !== 2) {
+            return array_map(
+                fn (string $message): array => [
+                    'code' => 'mapping.invalid_v1',
+                    'pointer' => '',
+                    'message' => $message,
+                ],
+                $this->validateV1(),
+            );
+        }
+
+        return $this->validateV2();
+    }
+
+    private function validateV1(): array
     {
         $errors = [];
         $allowedTopLevel = ['schema_version', 'ignore_types', 'statuses', 'updates', 'custom_fields'];
@@ -217,6 +406,7 @@ class MappingPolicy
                 'data_type',
                 'label',
                 'description',
+                'choice_set',
             ];
             foreach (array_keys($rule) as $property) {
                 if (! in_array($property, $allowedProperties, true)) {
@@ -241,6 +431,7 @@ class MappingPolicy
                 'url',
                 'json',
                 'decimal',
+                'select',
             ], true)) {
                 $errors[] = "Custom-field rule {$index} has an unsupported data_type.";
             }
@@ -289,6 +480,186 @@ class MappingPolicy
         return $errors;
     }
 
+    private function validateV2(): array
+    {
+        $issues = [];
+        $allowedTopLevel = [
+            'schema_version',
+            'object_policies',
+            'reference_rules',
+            'status_rules',
+            'update_rules',
+            'field_rules',
+            'relation_rules',
+            'preservation_rules',
+        ];
+        foreach (array_keys($this->mapping) as $key) {
+            if (! in_array($key, $allowedTopLevel, true)) {
+                $issues[] = $this->issue('mapping.unsupported_property', "/{$key}", "Unsupported mapping property {$key}.");
+            }
+        }
+        foreach (['object_policies', 'reference_rules', 'status_rules', 'update_rules', 'field_rules', 'relation_rules', 'preservation_rules'] as $key) {
+            if (! is_array($this->mapping[$key] ?? null)) {
+                $issues[] = $this->issue('mapping.invalid_type', "/{$key}", "{$key} must be an object or array.");
+            }
+        }
+        foreach (($this->mapping['object_policies'] ?? []) as $type => $policy) {
+            $pointer = '/object_policies/'.$this->pointer((string) $type);
+            if (! in_array($type, $this->sourceTypes(), true) || ! is_array($policy)) {
+                $issues[] = $this->issue('mapping.invalid_object_policy', $pointer, "Object policy {$type} is invalid.");
+
+                continue;
+            }
+            if (! in_array($policy['policy'] ?? null, ['migrate', 'ignore', 'preserve'], true)) {
+                $issues[] = $this->issue('mapping.invalid_policy', "{$pointer}/policy", 'Policy must be migrate, ignore or preserve.');
+            }
+            if (($policy['policy'] ?? null) === 'migrate' && (! is_string($policy['target_type'] ?? null) || $policy['target_type'] === '')) {
+                $issues[] = $this->issue('mapping.target_required', "{$pointer}/target_type", 'Migrated objects require a target_type.');
+            } elseif (($policy['policy'] ?? null) === 'migrate'
+                && ! in_array($policy['target_type'], array_keys((new ResourceRegistry)->all()), true)
+            ) {
+                $issues[] = $this->issue('mapping.invalid_target_type', "{$pointer}/target_type", 'Unsupported NetBox target type.');
+            }
+        }
+
+        $this->validateRuleList($issues, 'reference_rules', ['id', 'source_type', 'source_field', 'target_type', 'target_field', 'match'], ['id', 'source_type', 'target_type']);
+        $this->validateRuleList($issues, 'status_rules', ['id', 'source_type', 'source_value', 'target_value'], ['id', 'source_type', 'source_value', 'target_value']);
+        $this->validateRuleList($issues, 'relation_rules', ['id', 'relation', 'source_type', 'target_type', 'enabled', 'settings'], ['id', 'relation']);
+        foreach (($this->mapping['reference_rules'] ?? []) as $index => $rule) {
+            if (! is_array($rule)) {
+                continue;
+            }
+            $pointer = "/reference_rules/{$index}";
+            if (($rule['match'] ?? 'natural_key') !== 'natural_key') {
+                $issues[] = $this->issue('mapping.reference_natural_key_required', "{$pointer}/match", 'References must match by natural key.');
+            }
+            if (! in_array($rule['source_type'] ?? null, $this->sourceTypes(), true)) {
+                $issues[] = $this->issue('mapping.invalid_source_type', "{$pointer}/source_type", 'Unsupported source type.');
+            }
+            if (! in_array($rule['target_type'] ?? null, array_keys((new ResourceRegistry)->all()), true)) {
+                $issues[] = $this->issue('mapping.invalid_reference_target', "{$pointer}/target_type", 'Unsupported reference target type.');
+            }
+            if (preg_match('/(?:^|_)id$/', (string) ($rule['target_field'] ?? '')) === 1) {
+                $issues[] = $this->issue('mapping.reference_numeric_id_forbidden', "{$pointer}/target_field", 'NetBox numeric IDs cannot be stored in mapping rules.');
+            }
+        }
+
+        $allowedActions = ['ignore', 'copy', 'fixed', 'concat', 'normalize', 'lookup'];
+        $seenTargets = [];
+        foreach (($this->mapping['field_rules'] ?? []) as $index => $rule) {
+            $pointer = "/field_rules/{$index}";
+            if (! is_array($rule)) {
+                $issues[] = $this->issue('mapping.invalid_rule', $pointer, 'Field rule must be an object.');
+
+                continue;
+            }
+            $allowed = ['id', 'action', 'source_type', 'source_field', 'target', 'target_kind', 'value', 'fields', 'separator', 'mode', 'table', 'default', 'data_type', 'label', 'description', 'choice_set'];
+            foreach (array_keys($rule) as $property) {
+                if (! in_array($property, $allowed, true)) {
+                    $issues[] = $this->issue('mapping.unsupported_rule_property', "{$pointer}/".$this->pointer((string) $property), "Unsupported field-rule property {$property}.");
+                }
+            }
+            if (! $this->validRuleId($rule['id'] ?? null)) {
+                $issues[] = $this->issue('mapping.invalid_rule_id', "{$pointer}/id", 'Rule id must be stable and URL-safe.');
+            }
+            if (! in_array($rule['action'] ?? null, $allowedActions, true)) {
+                $issues[] = $this->issue('mapping.invalid_action', "{$pointer}/action", 'Unsupported field action.');
+            }
+            if (! in_array($rule['target_kind'] ?? 'field', ['field', 'custom_field'], true)) {
+                $issues[] = $this->issue('mapping.invalid_target_kind', "{$pointer}/target_kind", 'Target kind must be field or custom_field.');
+            }
+            if (! in_array($rule['source_type'] ?? null, $this->sourceTypes(), true)) {
+                $issues[] = $this->issue('mapping.invalid_source_type', "{$pointer}/source_type", 'Unsupported source type.');
+            }
+            if (($rule['action'] ?? null) !== 'ignore' && ! preg_match('/^[a-z][a-z0-9_]{0,63}$/', (string) ($rule['target'] ?? ''))) {
+                $issues[] = $this->issue('mapping.invalid_target', "{$pointer}/target", 'Target must be a canonical field name.');
+            }
+            if (in_array($rule['action'] ?? null, ['copy', 'normalize', 'lookup'], true) && ! is_string($rule['source_field'] ?? null)) {
+                $issues[] = $this->issue('mapping.source_field_required', "{$pointer}/source_field", 'This action requires source_field.');
+            }
+            if (($rule['action'] ?? null) === 'concat' && (! is_array($rule['fields'] ?? null) || $rule['fields'] === [])) {
+                $issues[] = $this->issue('mapping.fields_required', "{$pointer}/fields", 'Concat requires source fields.');
+            }
+            if (($rule['action'] ?? null) === 'lookup' && ! is_array($rule['table'] ?? null)) {
+                $issues[] = $this->issue('mapping.lookup_required', "{$pointer}/table", 'Lookup requires a conversion table.');
+            }
+            if (($rule['data_type'] ?? 'text') === 'select') {
+                $choiceSet = $rule['choice_set'] ?? null;
+                $choices = is_array($choiceSet) ? ($choiceSet['choices'] ?? null) : null;
+                $validChoices = is_array($choices) && count($choices) >= 2
+                    && count(array_unique(array_map('strval', $choices))) === count($choices)
+                    && collect($choices)->every(fn (mixed $choice): bool => is_string($choice) && $choice !== '');
+                if (! is_array($choiceSet) || ! is_string($choiceSet['name'] ?? null) || trim((string) $choiceSet['name']) === '' || ! $validChoices) {
+                    $issues[] = $this->issue('mapping.choice_set_required', "{$pointer}/choice_set", 'Selection custom fields require a named choice set with at least two distinct values.');
+                }
+                if (is_array($choiceSet) && ! is_bool($choiceSet['approved'] ?? null)) {
+                    $issues[] = $this->issue('mapping.choice_set_approval_required', "{$pointer}/choice_set/approved", 'Choice-set creation must be explicitly approved or rejected.');
+                }
+            }
+            $identity = (string) ($rule['source_type'] ?? '')."\0".(string) ($rule['target'] ?? '');
+            if (($rule['action'] ?? null) !== 'ignore' && isset($seenTargets[$identity])) {
+                $issues[] = $this->issue('mapping.duplicate_target', "{$pointer}/target", 'A source type may write each target field only once.');
+            }
+            $seenTargets[$identity] = true;
+        }
+
+        $updateFields = [
+            'tenant' => ['name', 'slug', 'description', 'comments', 'tags', 'custom_fields'],
+            'site' => ['name', 'slug', 'status', 'description', 'physical_address', 'comments', 'tags', 'custom_fields'],
+            'location' => ['name', 'slug', 'status', 'description', 'tags', 'custom_fields'],
+            'rack' => ['name', 'status', 'serial', 'asset_tag', 'type', 'width', 'u_height', 'description', 'comments', 'tags', 'custom_fields'],
+            'manufacturer' => ['name', 'slug', 'description'],
+            'device_type' => ['model', 'slug', 'part_number', 'u_height', 'is_full_depth', 'description', 'comments', 'tags', 'custom_fields'],
+            'device_role' => ['name', 'slug', 'color', 'description'],
+            'device' => ['name', 'status', 'serial', 'asset_tag', 'description', 'comments', 'tags', 'custom_fields'],
+            'interface' => ['name', 'type', 'enabled', 'description', 'mtu', 'mac_address', 'tags', 'custom_fields'],
+            'provider' => ['name', 'slug', 'description', 'comments', 'tags', 'custom_fields'],
+            'circuit_type' => ['name', 'slug', 'description'],
+            'circuit' => ['cid', 'status', 'install_date', 'termination_date', 'commit_rate', 'description', 'comments', 'tags', 'custom_fields'],
+            'rir' => ['name', 'slug', 'is_private', 'description'],
+            'asn' => ['asn', 'description', 'comments', 'tags', 'custom_fields'],
+            'tag' => ['name', 'slug', 'color', 'description'],
+            'vrf' => ['name', 'rd', 'description', 'comments', 'tags', 'custom_fields'],
+            'vlan_group' => ['name', 'slug', 'description', 'tags', 'custom_fields'],
+            'vlan' => ['name', 'status', 'description', 'comments', 'tags', 'custom_fields'],
+            'prefix' => ['status', 'description', 'comments', 'is_pool', 'mark_utilized', 'tags', 'custom_fields'],
+            'ip_address' => ['status', 'dns_name', 'description', 'comments', 'tags', 'custom_fields', 'assigned_object_type', 'assigned_object_id'],
+        ];
+        foreach (($this->mapping['update_rules'] ?? []) as $type => $fields) {
+            if (! isset($updateFields[$type]) || ! is_array($fields)) {
+                $issues[] = $this->issue('mapping.invalid_update_rule', '/update_rules/'.$this->pointer((string) $type), "Update rule {$type} is invalid.");
+
+                continue;
+            }
+            foreach ($fields as $index => $field) {
+                if (! is_string($field) || ! in_array($field, $updateFields[$type], true)) {
+                    $issues[] = $this->issue('mapping.invalid_update_field', '/update_rules/'.$this->pointer((string) $type)."/{$index}", 'Unsupported opt-in update field.');
+                }
+            }
+        }
+
+        foreach (($this->mapping['preservation_rules'] ?? []) as $type => $handling) {
+            if (! in_array($type, $this->sourceTypes(), true) || ! in_array($handling, ['report', 'note', 'custom_field', 'discard'], true)) {
+                $issues[] = $this->issue('mapping.invalid_preservation', '/preservation_rules/'.$this->pointer((string) $type), 'Unsupported preservation rule.');
+            }
+        }
+
+        $ids = [];
+        foreach (['reference_rules', 'status_rules', 'field_rules', 'relation_rules'] as $section) {
+            foreach (($this->mapping[$section] ?? []) as $index => $rule) {
+                $id = is_array($rule) ? ($rule['id'] ?? null) : null;
+                if (is_string($id) && isset($ids[$id])) {
+                    $issues[] = $this->issue('mapping.duplicate_rule_id', "/{$section}/{$index}/id", 'Rule ids must be unique across the mapping.');
+                }
+                if (is_string($id)) {
+                    $ids[$id] = true;
+                }
+            }
+        }
+
+        return $issues;
+    }
+
     private function concatenate(array $rule, array $legacy): string
     {
         $values = array_map(
@@ -321,6 +692,9 @@ class MappingPolicy
             'decimal' => is_numeric($value) ? [true, (string) $value] : [false, null],
             'json' => $this->jsonValue($value),
             'date' => $this->dateValue($value),
+            'select' => is_scalar($value) || $value instanceof \Stringable
+                ? [true, (string) $value]
+                : [false, null],
             'url' => is_string($value) && filter_var($value, FILTER_VALIDATE_URL) !== false
                 ? [true, $value]
                 : [false, null],
@@ -382,8 +756,111 @@ class MappingPolicy
             : [false, null];
     }
 
+    private function validateRuleList(array &$issues, string $section, array $allowed, array $required): void
+    {
+        foreach (($this->mapping[$section] ?? []) as $index => $rule) {
+            $pointer = "/{$section}/{$index}";
+            if (! is_array($rule)) {
+                $issues[] = $this->issue('mapping.invalid_rule', $pointer, 'Rule must be an object.');
+
+                continue;
+            }
+            foreach (array_keys($rule) as $property) {
+                if (! in_array($property, $allowed, true)) {
+                    $issues[] = $this->issue('mapping.unsupported_rule_property', "{$pointer}/".$this->pointer((string) $property), "Unsupported rule property {$property}.");
+                }
+            }
+            foreach ($required as $property) {
+                if (! array_key_exists($property, $rule) || $rule[$property] === '') {
+                    $issues[] = $this->issue('mapping.required_property', "{$pointer}/{$property}", "Rule property {$property} is required.");
+                }
+            }
+            if (! $this->validRuleId($rule['id'] ?? null)) {
+                $issues[] = $this->issue('mapping.invalid_rule_id', "{$pointer}/id", 'Rule id must be stable and URL-safe.');
+            }
+        }
+    }
+
+    private function issue(string $code, string $pointer, string $message): array
+    {
+        return compact('code', 'pointer', 'message');
+    }
+
+    private function validRuleId(mixed $id): bool
+    {
+        return is_string($id) && preg_match('/^[a-z0-9][a-z0-9._:-]{0,127}$/', $id) === 1;
+    }
+
+    private function pointer(string $value): string
+    {
+        return str_replace(['~', '/'], ['~0', '~1'], $value);
+    }
+
+    private function ruleId(string $kind, array $rule, int|string|null $salt = null): string
+    {
+        unset($rule['id']);
+
+        return $kind.'-'.substr(CanonicalJson::fingerprint([$rule, $salt]), 0, 16);
+    }
+
+    private function canonicalize(array $mapping): array
+    {
+        foreach (['reference_rules', 'status_rules', 'field_rules', 'relation_rules'] as $section) {
+            $rules = array_values(array_filter($mapping[$section] ?? [], 'is_array'));
+            foreach ($rules as &$rule) {
+                if (! $this->validRuleId($rule['id'] ?? null)) {
+                    $rule['id'] = $this->ruleId(rtrim($section, 's'), $rule);
+                }
+            }
+            unset($rule);
+            usort($rules, fn (array $left, array $right): int => (string) $left['id'] <=> (string) $right['id']);
+            $mapping[$section] = $rules;
+        }
+        foreach (['object_policies', 'update_rules', 'preservation_rules'] as $section) {
+            if (is_array($mapping[$section] ?? null)) {
+                ksort($mapping[$section], SORT_STRING);
+            }
+        }
+
+        return $mapping;
+    }
+
     private function sourceTypes(): array
     {
-        return ['vrf', 'vlan_group', 'vlan', 'prefix', 'ip_address'];
+        return [
+            'customer',
+            'contact',
+            'section',
+            'tag',
+            'location',
+            'rack',
+            'device_role',
+            'manufacturer',
+            'device_type',
+            'device',
+            'interface',
+            'mac_address',
+            'provider',
+            'circuit_type',
+            'circuit',
+            'circuit_termination',
+            'rir',
+            'asn',
+            'bgp_session',
+            'vrf',
+            'vlan_group',
+            'vlan',
+            'prefix',
+            'ip_address',
+            'ip_assignment',
+            'primary_ip',
+            'nat',
+            'nameserver',
+            'firewall',
+            'scan_agent',
+            'pstn',
+            'logical_circuit',
+            'extension',
+        ];
     }
 }

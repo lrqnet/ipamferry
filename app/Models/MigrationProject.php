@@ -21,6 +21,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property array<string, mixed>|null $target_instance
  * @property array<string, mixed>|null $discovery_manifest
  * @property int $snapshot_schema_version
+ * @property int $mapping_revision
+ * @property array<string, mixed>|null $mapping_catalog
  * @property string|null $last_error
  */
 class MigrationProject extends Model
@@ -38,6 +40,8 @@ class MigrationProject extends Model
         'target_instance',
         'discovery_manifest',
         'snapshot_schema_version',
+        'mapping_revision',
+        'mapping_catalog',
         'last_error',
     ];
 
@@ -51,6 +55,7 @@ class MigrationProject extends Model
             'source_instance' => 'array',
             'target_instance' => 'array',
             'discovery_manifest' => 'array',
+            'mapping_catalog' => 'array',
         ];
     }
 
@@ -76,5 +81,11 @@ class MigrationProject extends Model
     public function events(): HasMany
     {
         return $this->hasMany(MigrationEvent::class, 'project_id');
+    }
+
+    /** @return HasMany<MappingPreview, $this> */
+    public function mappingPreviews(): HasMany
+    {
+        return $this->hasMany(MappingPreview::class, 'project_id');
     }
 }

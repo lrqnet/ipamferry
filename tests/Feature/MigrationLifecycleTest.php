@@ -70,6 +70,10 @@ class MigrationLifecycleTest extends TestCase
         self::assertTrue($verification['passed']);
         self::assertSame(1, $verification['checked']);
         self::assertSame(MigrationExecutionStatus::Verified, $sameExecution->refresh()->status);
+        $this->actingAs($user)
+            ->post(route('projects.plan', $project))
+            ->assertStatus(422);
+        self::assertCount(1, $project->plans);
         self::assertStringNotContainsString(
             'runtime-token',
             json_encode([
@@ -229,6 +233,48 @@ class MigrationLifecycleTest extends TestCase
         }
     }
 
+    public function test_etag_drift_before_an_explicit_patch_blocks_apply_without_writing(): void
+    {
+        [$project, $plan, $user] = $this->plannedUpdateProject();
+        $patches = 0;
+        Http::fake(function (Request $request) use (&$patches) {
+            $path = (string) parse_url($request->url(), PHP_URL_PATH);
+            if ($path === '/api/status/') {
+                return Http::response(['netbox-version' => '4.5.3', 'plugins' => []], 200, ['API-Version' => '4.5']);
+            }
+            if ($path === '/api/ipam/vrfs/100/' && $request->method() === 'GET') {
+                return Http::response([
+                    'id' => 100,
+                    'name' => 'Blue',
+                    'rd' => '65000:1',
+                    'description' => 'Changed by another operator',
+                    'last_updated' => '2026-07-25T10:02:00Z',
+                ], 200, ['ETag' => '"new-version"']);
+            }
+            if ($path === '/api/ipam/vrfs/100/' && $request->method() === 'PATCH') {
+                $patches++;
+
+                return Http::response([], 412);
+            }
+
+            return Http::response(['results' => [], 'next' => null]);
+        });
+
+        $this->expectException(DomainException::class);
+        $this->expectExceptionMessage('changed after discovery');
+        try {
+            app(MigrationApplier::class)->apply(
+                $project,
+                $plan,
+                'https://netbox.example.test',
+                'nbt_test.runtime-token',
+                $user->id,
+            );
+        } finally {
+            self::assertSame(0, $patches);
+        }
+    }
+
     public function test_lost_update_response_is_recovered_without_a_second_patch(): void
     {
         [$project, $plan, $user] = $this->plannedUpdateProject();
@@ -365,6 +411,51 @@ class MigrationLifecycleTest extends TestCase
                 ->where('project.has_source_snapshot', true)
                 ->missing('project.source_snapshot')
                 ->missing('project.target_snapshot'));
+    }
+
+    public function test_plan_with_preserved_data_requires_an_explicit_second_acknowledgement(): void
+    {
+        [$project, , $user] = $this->plannedProject(1);
+        $project->plans()->delete();
+        $source = $project->source_snapshot;
+        $source['preserved'] = ['nameservers' => [['source_id' => 'private-source-id']]];
+        $project->update(['source_snapshot' => $source, 'status' => MigrationProjectStatus::Discovered]);
+        (new BuildMigrationPlan($project->id))->handle(
+            app(MigrationPlanner::class),
+            app(MigrationAudit::class),
+            app(MigrationOperationLock::class),
+        );
+        $plan = $project->plans()->latest('id')->firstOrFail();
+
+        $this->actingAs($user)
+            ->post(route('projects.plans.approve', [$project, $plan]), ['confirm' => true])
+            ->assertSessionHasErrors('preservation_acknowledged');
+        self::assertNull($plan->fresh()->approved_at);
+
+        $this->actingAs($user)
+            ->post(route('projects.plans.approve', [$project, $plan]), [
+                'confirm' => true,
+                'preservation_acknowledged' => true,
+            ])
+            ->assertRedirect();
+        self::assertNotNull($plan->fresh()->approved_at);
+        $event = DB::table('migration_events')
+            ->where('plan_id', $plan->id)
+            ->where('kind', 'plan.preservation_acknowledged')
+            ->first();
+        self::assertNotNull($event);
+        self::assertStringNotContainsString('private-source-id', json_encode($event, JSON_THROW_ON_ERROR));
+    }
+
+    public function test_plan_without_preserved_data_needs_only_the_normal_approval_confirmation(): void
+    {
+        [$project, $plan, $user] = $this->plannedProject(1);
+        $plan->update(['approved_at' => null, 'approved_by' => null]);
+
+        $this->actingAs($user)
+            ->post(route('projects.plans.approve', [$project, $plan]), ['confirm' => true])
+            ->assertRedirect();
+        self::assertNotNull($plan->fresh()->approved_at);
     }
 
     private function plannedProject(int $vrfCount): array

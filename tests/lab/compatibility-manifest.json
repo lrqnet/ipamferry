@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "published_at": "2026-07-25",
+  "phpipam": {
+    "v1.5.2": "sha256:3c6fd1332aebc75751da6efe51b1c38f2a152619fe445103d9cc085d89847b61",
+    "v1.7.4": "sha256:58c48da221bad605dbf055b6683249741d885d7cd4380d1f32acd211aad4fdb2",
+    "v1.8.1": "sha256:a1a3393b6a8c6e3ca683461f3652e98358891f5b078823f0d48fae1b3af7e3eb"
+  },
+  "netbox": {
+    "v4.4.10-3.4.2": "sha256:14c2de3f179d8ed5b5722a76b6d7389c8c95bb8be46c600f3d7fe1f7698b4574",
+    "v4.5.10-4.0.2": "sha256:3b053a0bd29d8a91e240bfe672d001d8e679b31cf0bea30f9c079fc76bdc1e54",
+    "v4.6.1-5.0.1": "sha256:0c798a266884b235b1f9df7ac57c94d98261748ec1ece4e152c3ad80db15e8dd"
+  },
+  "matrix": [
+    {"phpipam": "v1.5.2", "netbox": "v4.6.1-5.0.1", "level": "deep", "status": "required"},
+    {"phpipam": "v1.7.4", "netbox": "v4.6.1-5.0.1", "level": "deep", "status": "required"},
+    {"phpipam": "v1.8.1", "netbox": "v4.6.1-5.0.1", "level": "deep", "status": "required"},
+    {"phpipam": "v1.8.1", "netbox": "v4.4.10-3.4.2", "level": "smoke", "status": "required"},
+    {"phpipam": "v1.8.1", "netbox": "v4.5.10-4.0.2", "level": "smoke", "status": "required"}
+  ]
+}

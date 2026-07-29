@@ -4,32 +4,18 @@
 
 <h1 align="center">IpamFerry</h1>
 
-<p align="center">Migrações auditáveis de phpIPAM para NetBox.</p>
+<p align="center">Auditable phpIPAM-to-NetBox migrations.</p>
 
-<p align="center">
-  Português · <a href="docs/ARCHITECTURE.en.md">English</a> · <a href="docs/ARQUITECTURA.es.md">Español</a>
-</p>
+> **Language:** [English](README.md) · [Português (Brasil)](docs/pt-BR/README.md) · [Español](docs/es/README.md)
 
-IpamFerry é um painel self-hosted para planejar e executar migrações auditáveis
-de phpIPAM para NetBox. Ele aceita conexão pela API phpIPAM ou um dump SQL,
-gera um plano revisável, aplica somente pela API oficial do NetBox e exporta um
-bundle de auditoria.
+IpamFerry is a self-hosted workbench for planning and applying phpIPAM migrations to NetBox. It reads the official phpIPAM API or a `mysqldump` SQL file, produces a reviewable plan, applies only through the official NetBox API, and exports an audit bundle.
 
 > [!WARNING]
-> Datasets IPAM e tokens de API são informações sensíveis. Restrinja o painel a
-> redes administrativas e use sempre HTTPS.
+> IPAM datasets and API tokens are sensitive. Restrict access to an administrative network and always use HTTPS.
 
-## Stack
+## Install
 
-- Laravel 13 e PHP 8.4;
-- Inertia 3, React 19, TypeScript e Tailwind CSS 4;
-- PostgreSQL e Laravel database queue;
-- FrankenPHP/Caddy e Docker Compose;
-- AGPL-3.0-only.
-
-## Instalação
-
-Baixe o `compose.yaml` de uma release e execute:
+Download `compose.yaml` from a release, then run:
 
 ```bash
 docker compose up -d --wait
@@ -37,69 +23,49 @@ docker compose ps
 docker compose exec app php artisan ipamferry:installation-token
 ```
 
-Abra `https://SEU_SERVIDOR`, use o token para criar o primeiro owner e conclua
-o assistente. O Compose gera chaves e senhas internas em volumes Docker; não
-há arquivo `.env` operacional.
+Open `https://YOUR_SERVER`, use the token to create the first owner, and finish setup. Compose generates internal keys and passwords in Docker volumes; no operational `.env` file is required.
 
-## Migração
+## Recover a local password
 
-1. Crie um projeto e selecione **API phpIPAM** ou **mysqldump SQL**.
-2. Descubra a origem e o destino. Tokens existem apenas na memória da
-   requisição e nunca entram no banco, na fila ou no bundle.
-3. Revise o inventário canônico e a política de mapeamento não executável.
-4. Gere um plano específico para aquela origem, destino, versão de API,
-   mapeamento e idioma.
-5. Resolva todos os conflitos. Um `owner` ou `administrator` aprova o
-   fingerprint exato; aprovação não autoriza outro plano.
-6. Aplique pela API REST do NetBox. Checkpoints persistentes permitem retomar
-   a mesma execução sem duplicar objetos.
-7. Verifique por IDs e chaves naturais e baixe o bundle auditável.
+Password recovery is intentionally performed by a Docker host administrator, not through email:
 
-O escopo automático atual cobre VRFs, VLAN Groups, VLANs, Prefixes, IP
-Addresses e custom fields aprovados. Sections, devices, racks, NAT, DNS,
-permissões e extensões são catalogados e preservados quando não existe
-equivalência segura; eles não são descartados silenciosamente.
+```bash
+docker compose exec -it app php artisan ipamferry:reset-password
+```
 
-Atualizações de objetos existentes são desativadas por padrão e habilitadas
-por tipo e campo na política. Restrições anunciadas pelo `OPTIONS` do NetBox,
-dependências ausentes, identidades ambíguas, colisões de unicidade e dados
-obrigatórios incompletos bloqueiam a aprovação.
+The command must run in an interactive terminal. When exactly one active owner exists, it selects that account; otherwise provide the exact email address:
 
-O parser de dump aceita SQL texto de `mysqldump`; ele nunca inicia MySQL nem
-executa sentenças do arquivo. O upload padrão aceita até 1 GiB e usa um
-diretório temporário dentro do volume privado, mesmo com o filesystem do
-container somente leitura. Para ensaiar, habilite o perfil `sandbox`:
+```bash
+docker compose exec -it app php artisan ipamferry:reset-password owner@example.test
+```
+
+It asks for confirmation and a hidden password twice, applies the same 14–128-character policy used during setup, invalidates active database sessions and pending reset tokens, and rotates the remember token. The password is never accepted as an argument, environment variable, or standard input. Host/Docker administrator access is therefore the recovery authority.
+
+## Migration workflow
+
+1. Create a project and choose **phpIPAM API** or **mysqldump SQL**.
+2. Discover source and destination. Tokens remain only in request/job memory.
+3. Use **Mapping Studio** to review mappings and run a non-applicable preview.
+4. Generate a destination-specific plan and resolve all conflicts.
+5. An `owner` or `administrator` approves the exact fingerprint.
+6. Apply through the NetBox REST API. Persistent checkpoints support safe resume.
+7. Verify by identifiers and natural keys, then download the audit bundle.
+
+Automatic migration covers safe NetBox core equivalents including tenants, tags, sites, locations, racks, manufacturers, device roles/types, devices, interfaces, MACs, providers, circuits, RIRs, ASNs, VRFs, VLAN groups/VLANs, prefixes, IP addresses, and approved custom fields. Primary IP, circuit terminations, and static 1:1 NAT are applied only after unambiguous matching and approval.
+
+PAT, BGP sessions, authoritative DNS, permissions, and extensions without a safe equivalent are preserved and explained; they are never partially converted or silently discarded.
+
+For a rehearsal environment:
 
 ```bash
 docker compose --profile sandbox up -d --wait
 ```
 
-O plano é específico do destino. Portanto, o fluxo correto é:
+A sandbox plan must never be reused in production. Rediscover the production NetBox and generate a sibling plan for it.
 
-1. descobrir o NetBox sandbox, gerar, aprovar, aplicar e verificar o plano de
-   ensaio;
-2. redescobrir somente o NetBox de produção, preservando origem e mapeamento;
-3. gerar e aprovar um novo plano irmão, agora calculado contra produção.
+## Development
 
-Um plano do sandbox nunca é reaproveitado literalmente em produção.
-As etapas de aplicação e verificação não permitem trocar o destino: elas usam
-obrigatoriamente o sandbox ou a instância de produção registrada no plano.
-
-## Integridade e retomada
-
-- snapshots e planos usam JSON canônico e fingerprints SHA-256;
-- cada plano fica vinculado à instância e à versão da API do NetBox;
-- links persistentes relacionam a identidade phpIPAM ao ID exato do destino;
-- alterações concorrentes no destino são detectadas por `last_updated` e,
-  quando disponível no NetBox 4.6+, `ETag`/`If-Match`;
-- criação e atualização perdidas após o envio são recuperadas apenas quando o
-  estado observado coincide exatamente com o payload aprovado;
-- enquanto uma execução não for verificada, descoberta, mapeamento e novo
-  planejamento permanecem bloqueados.
-
-## Desenvolvimento
-
-Requer PHP 8.4, Composer e Node 22 ou Docker:
+PHP 8.4, Composer, and Node 22 are required outside Docker:
 
 ```bash
 composer install
@@ -111,24 +77,12 @@ npm run build
 php artisan test
 ```
 
-Os comandos de automação são `ipamferry:doctor`, `ipamferry:inspect`,
-`ipamferry:plan`, `ipamferry:apply`, `ipamferry:verify` e
-`ipamferry:bundle`. A saída do CLI e as chaves dos JSONs reexecutáveis são
-sempre em inglês. No container, forneça credenciais efêmeras com
+CLI output and re-executable JSON keys are always English. See the [documentation index](docs/README.md) for architecture, Mapping Studio, operations, releases, and ADRs.
 
-```bash
-docker compose exec \
-  -e NETBOX_URL=https://netbox.example.test \
-  -e NETBOX_TOKEN=... \
-  app php artisan ipamferry:apply PROJECT_ID --plan=PLAN_ID
-```
+## Release validation
 
-Detalhes do modelo, chaves naturais, estados e limites estão em
-[docs/ARQUITETURA.md](docs/ARQUITETURA.md).
+The disposable real-source laboratory, version matrix, and coverage rules are documented in [Release validation](docs/VALIDATION.md).
 
-## Dados sem equivalente
+## License
 
-Itens phpIPAM sem tradução nativa confiável — como permissões, extensões,
-registros DNS autoritativos ou dados incompletos de dispositivos — não são
-descartados silenciosamente. Eles aparecem no relatório de preservação do
-bundle para revisão ou mapeamento manual.
+IpamFerry is licensed under [AGPL-3.0-only](LICENSE).

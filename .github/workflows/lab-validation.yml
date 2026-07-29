@@ -1,0 +1,38 @@
+name: phpipam-netbox-lab
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '41 2 * * 6'
+
+permissions:
+  contents: read
+
+jobs:
+  compatibility:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: phpipam-1-5-netbox-4-6
+            phpipam: v1.5.2
+            netbox: netboxcommunity/netbox:v4.6.1-5.0.1
+          - name: phpipam-1-7-netbox-4-6
+            phpipam: v1.7.4
+            netbox: netboxcommunity/netbox:v4.6.1-5.0.1
+          - name: phpipam-1-8-netbox-4-6
+            phpipam: v1.8.1
+            netbox: netboxcommunity/netbox:v4.6.1-5.0.1
+          - name: phpipam-1-8-netbox-4-4
+            phpipam: v1.8.1
+            netbox: netboxcommunity/netbox:v4.4.10-3.4.2
+          - name: phpipam-1-8-netbox-4-5
+            phpipam: v1.8.1
+            netbox: netboxcommunity/netbox:v4.5.10-4.0.2
+    name: ${{ matrix.name }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with: {persist-credentials: false}
+      - run: ./scripts/lab-test.sh '${{ matrix.phpipam }}' '${{ matrix.netbox }}'

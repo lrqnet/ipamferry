@@ -11,7 +11,10 @@ use ZipArchive;
 
 class BundleBuilder
 {
-    public function __construct(private readonly PlanIntegrity $integrity) {}
+    public function __construct(
+        private readonly PlanIntegrity $integrity,
+        private readonly PrefixHierarchy $prefixHierarchy,
+    ) {}
 
     public function build(MigrationProject $project, ?MigrationPlan $plan = null): string
     {
@@ -31,6 +34,7 @@ class BundleBuilder
         $generatedAt = now()->toIso8601String();
         $execution = $plan->executions()->with('actionResults')->latest('id')->first();
         $preservationSummary = $this->preservationSummary($plan->preservation);
+        $prefixHierarchy = $this->prefixHierarchy->fromActions($plan->actions);
         $report = [
             'locale' => $locale,
             'title' => Lang::get('ipamferry.report.title', [], $locale),
@@ -59,6 +63,12 @@ class BundleBuilder
                 'title' => Lang::get('ipamferry.report.preservation', [], $locale),
                 'categories' => $preservationSummary,
             ],
+            'prefix_hierarchy' => [
+                'title' => Lang::get('ipamferry.report.prefix_hierarchy', [], $locale),
+                'roots' => count($prefixHierarchy),
+                'prefixes' => $this->prefixCount($prefixHierarchy),
+                'tree' => $prefixHierarchy,
+            ],
         ];
         $files = [
             'mapping.json' => $this->json($plan->mapping_snapshot),
@@ -82,6 +92,22 @@ class BundleBuilder
                 'data' => $plan->preservation,
             ]),
             'report.html' => $this->html($report, $locale),
+            'coverage.json' => $this->json($this->coverage($plan)),
+            'prefix-hierarchy.json' => $this->json([
+                'schema_version' => 1,
+                'title' => Lang::get('ipamferry.report.prefix_hierarchy', [], $locale),
+                'roots' => $prefixHierarchy,
+            ]),
+            'proposed-references.json' => $this->json([
+                'schema_version' => 1,
+                'reference_rules' => $plan->mapping_snapshot['reference_rules'] ?? [],
+                'relation_rules' => $plan->mapping_snapshot['relation_rules'] ?? [],
+            ]),
+            'preservation-decisions.json' => $this->json([
+                'schema_version' => 1,
+                'rules' => $plan->mapping_snapshot['preservation_rules'] ?? [],
+                'preservation' => $plan->preservation,
+            ]),
         ];
         if ($execution !== null) {
             $files['execution.json'] = $this->json([
@@ -119,8 +145,10 @@ class BundleBuilder
         ]);
 
         $manifest = [
-            'schema_version' => 1,
+            'schema_version' => 2,
             'ipamferry_version' => config('ipamferry.version'),
+            'mapping_schema_version' => $plan->mapping_snapshot['schema_version'] ?? 1,
+            'plan_schema_version' => $plan->schema_version,
             'project_id' => $project->id,
             'plan_id' => $plan->id,
             'fingerprint' => $plan->fingerprint,
@@ -156,6 +184,16 @@ class BundleBuilder
 
     private function localizedWarning(string $warning, string $locale): string
     {
+        if (str_starts_with($warning, '{')) {
+            try {
+                $issue = json_decode($warning, true, 64, JSON_THROW_ON_ERROR);
+                $reason = is_array($issue) ? ($issue['reason'] ?? null) : null;
+                if (is_string($reason) && Lang::has("ipamferry.report.issues.{$reason}", $locale)) {
+                    return Lang::get("ipamferry.report.issues.{$reason}", [], $locale);
+                }
+            } catch (\JsonException) {
+            }
+        }
         if (preg_match('/^([a-z0-9_]+) require mapping review before export to NetBox\.$/', $warning, $matches)) {
             return Lang::get('ipamferry.report.warning', ['type' => $matches[1]], $locale);
         }
@@ -172,13 +210,16 @@ class BundleBuilder
             array_keys($report['preservation']['categories']),
         ));
 
-        return '<!doctype html><html lang="'.e(str_replace('_', '-', $locale)).'"><head><meta charset="utf-8"><title>'.e($report['title']).'</title></head><body><h1>'.e($report['title']).'</h1><p>'.e($report['summary']).'</p><p><strong>'.e(Lang::get('ipamferry.report.generated_at', [], $locale)).':</strong> '.e($report['generated_at']).'</p><h2>'.e(Lang::get('ipamferry.report.warnings', [], $locale)).'</h2><ul>'.$warnings.'</ul><h2>'.e($report['preservation']['title']).'</h2><table><thead><tr><th>'.e(Lang::get('ipamferry.report.category', [], $locale)).'</th><th>'.e(Lang::get('ipamferry.report.objects', [], $locale)).'</th></tr></thead><tbody>'.$preservation.'</tbody></table></body></html>';
+        return '<!doctype html><html lang="'.e(str_replace('_', '-', $locale)).'"><head><meta charset="utf-8"><title>'.e($report['title']).'</title></head><body><h1>'.e($report['title']).'</h1><p>'.e($report['summary']).'</p><p><strong>'.e(Lang::get('ipamferry.report.generated_at', [], $locale)).':</strong> '.e($report['generated_at']).'</p><h2>'.e(Lang::get('ipamferry.report.warnings', [], $locale)).'</h2><ul>'.$warnings.'</ul><h2>'.e($report['preservation']['title']).'</h2><table><thead><tr><th>'.e(Lang::get('ipamferry.report.category', [], $locale)).'</th><th>'.e(Lang::get('ipamferry.report.objects', [], $locale)).'</th></tr></thead><tbody>'.$preservation.'</tbody></table><h2>'.e($report['prefix_hierarchy']['title']).'</h2>'.$this->prefixTree($report['prefix_hierarchy']['tree'] ?? []).'</body></html>';
     }
 
     private function preservationSummary(array $preservation): array
     {
         $summary = [];
         foreach ($preservation as $category => $value) {
+            if (in_array($category, ['decisions', 'source_records', 'ignored'], true)) {
+                continue;
+            }
             if (! is_array($value)) {
                 $summary[$category] = 0;
 
@@ -190,5 +231,51 @@ class BundleBuilder
         }
 
         return $summary;
+    }
+
+    private function coverage(MigrationPlan $plan): array
+    {
+        $sourceTypes = [];
+        $targetTypes = [];
+        $operations = [];
+        foreach ($plan->actions as $action) {
+            $sourceType = (string) ($action['source_type'] ?? 'unknown');
+            $targetType = (string) ($action['target_type'] ?? 'unknown');
+            $operation = (string) ($action['operation'] ?? 'unknown');
+            $sourceTypes[$sourceType] = ($sourceTypes[$sourceType] ?? 0) + 1;
+            $targetTypes[$targetType] = ($targetTypes[$targetType] ?? 0) + 1;
+            $operations[$operation] = ($operations[$operation] ?? 0) + 1;
+        }
+        ksort($sourceTypes, SORT_STRING);
+        ksort($targetTypes, SORT_STRING);
+        ksort($operations, SORT_STRING);
+
+        return [
+            'schema_version' => 1,
+            'source_types' => $sourceTypes,
+            'target_types' => $targetTypes,
+            'operations' => $operations,
+            'preservation' => $this->preservationSummary($plan->preservation),
+        ];
+    }
+
+    private function prefixCount(array $nodes): int
+    {
+        return array_sum(array_map(fn (array $node): int => 1 + $this->prefixCount($node['children'] ?? []), $nodes));
+    }
+
+    private function prefixTree(array $nodes): string
+    {
+        if ($nodes === []) {
+            return '<p>0</p>';
+        }
+        $items = implode('', array_map(function (array $node): string {
+            $label = e($node['prefix']);
+            $description = isset($node['description']) ? ' — '.e($node['description']) : '';
+
+            return '<li><code>'.$label.'</code>'.$description.$this->prefixTree($node['children'] ?? []).'</li>';
+        }, $nodes));
+
+        return '<ul>'.$items.'</ul>';
     }
 }

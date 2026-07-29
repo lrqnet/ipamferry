@@ -1,4 +1,8 @@
 @import "tailwindcss";
 
-@theme { --color-ferry: #38bdf8; }
-body { min-height: 100vh; }
+@theme {
+  --color-ferry: #38bdf8;
+}
+body {
+  min-height: 100vh;
+}

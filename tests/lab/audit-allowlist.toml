@@ -1,0 +1,9 @@
+[[allowlist]]
+description = "Clearly fictional development placeholder"
+path = '''^\.env\.example$'''
+regex = '''example-only-not-for-production'''
+
+[[allowlist]]
+description = "Synthetic addresses and domains used only by tests"
+path = '''^(tests|docs|README\.md)'''
+regex = '''(example\.test|example\.invalid|192\.0\.2\.|198\.51\.100\.|2001:db8:)'''

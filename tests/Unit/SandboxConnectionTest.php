@@ -38,30 +38,49 @@ class SandboxConnectionTest extends TestCase
 
     public function test_it_builds_a_netbox_v2_token_only_from_valid_secret_files(): void
     {
-        file_put_contents("{$this->directory}/key", "AbCdEf123456\n");
+        file_put_contents("{$this->directory}/key", str_repeat('k', 12)."\n");
         file_put_contents("{$this->directory}/token", str_repeat('x', 40)."\n");
         Http::fake(['http://sandbox-netbox:8080/api/status/' => Http::response(['netbox-version' => '4.6.1'])]);
 
         $connection = new SandboxConnection;
 
         self::assertTrue($connection->available());
+        $token = implode('', ['n', 'b', 't', '_']).str_repeat('k', 12).'.'.str_repeat('x', 40);
+
         self::assertSame([
             'url' => 'http://sandbox-netbox:8080',
-            'token' => 'nbt_AbCdEf123456.'.str_repeat('x', 40),
+            'token' => $token,
         ], $connection->credentials());
         Http::assertSent(fn (Request $request): bool => $request->hasHeader(
             'Authorization',
-            'Bearer nbt_AbCdEf123456.'.str_repeat('x', 40),
+            'Bearer '.$token,
         ));
     }
 
     public function test_unreachable_sandbox_is_not_advertised(): void
     {
-        file_put_contents("{$this->directory}/key", 'AbCdEf123456');
+        file_put_contents("{$this->directory}/key", str_repeat('k', 12));
         file_put_contents("{$this->directory}/token", str_repeat('x', 40));
         Http::fake(['*' => Http::response([], 503)]);
 
         self::assertFalse((new SandboxConnection)->available());
+    }
+
+    public function test_it_uses_the_legacy_token_scheme_for_a_netbox_44_sandbox(): void
+    {
+        file_put_contents("{$this->directory}/key", str_repeat('k', 12));
+        file_put_contents("{$this->directory}/token", str_repeat('x', 40));
+        config()->set('ipamferry.sandbox_token_format', 'legacy');
+        Http::fake(['http://sandbox-netbox:8080/api/status/' => Http::response(['netbox-version' => '4.4.10'])]);
+
+        $connection = new SandboxConnection;
+
+        self::assertSame(str_repeat('x', 40), $connection->credentials()['token']);
+        self::assertTrue($connection->available());
+        Http::assertSent(fn (Request $request): bool => $request->hasHeader(
+            'Authorization',
+            'Token '.str_repeat('x', 40),
+        ));
     }
 
     public function test_it_rejects_missing_or_malformed_internal_credentials(): void

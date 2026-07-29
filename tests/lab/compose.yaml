@@ -1,0 +1,165 @@
+name: ipamferry-lab
+
+services:
+  lab-init:
+    image: alpine:3.21
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        umask 077
+        test -f /run/lab-secrets/mariadb_root_password || head -c 32 /dev/urandom | base64 > /run/lab-secrets/mariadb_root_password
+        test -f /run/lab-secrets/mariadb_password || head -c 32 /dev/urandom | base64 > /run/lab-secrets/mariadb_password
+        test -f /run/lab-secrets/api_read_token || head -c 32 /dev/urandom | base64 | tr -d '=+/' | cut -c1-32 > /run/lab-secrets/api_read_token
+        test -f /run/lab-secrets/api_seed_token || head -c 32 /dev/urandom | base64 | tr -d '=+/' | cut -c1-32 > /run/lab-secrets/api_seed_token
+        test -f /run/lab-secrets/admin_password || head -c 32 /dev/urandom | base64 > /run/lab-secrets/admin_password
+        chmod 0444 /run/lab-secrets/*
+    restart: "no"
+    network_mode: none
+    read_only: true
+    cap_drop: [ALL]
+    volumes:
+      - phpipam_lab_secrets:/run/lab-secrets
+    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=16m"]
+
+  phpipam-db:
+    image: mariadb:10.11
+    restart: "no"
+    depends_on:
+      lab-init: { condition: service_completed_successfully }
+    environment:
+      MARIADB_DATABASE: phpipam
+      MARIADB_USER: phpipam
+      MARIADB_PASSWORD_FILE: /run/lab-secrets/mariadb_password
+      MARIADB_ROOT_PASSWORD_FILE: /run/lab-secrets/mariadb_root_password
+    volumes:
+      - phpipam_lab_mariadb:/var/lib/mysql
+      - phpipam_lab_secrets:/run/lab-secrets:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mariadb-admin ping --silent --protocol=tcp --host=localhost --user=root --password=\"$$(cat /run/lab-secrets/mariadb_root_password)\""]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    networks: [phpipam_lab]
+
+  phpipam-bootstrap:
+    image: phpipam/phpipam-www:${PHPIPAM_LAB_VERSION:-v1.8.1}
+    command: ["/bin/sh", "/lab/bootstrap.sh"]
+    restart: "no"
+    depends_on:
+      phpipam-db: { condition: service_healthy }
+    environment:
+      IPAM_DATABASE_HOST: phpipam-db
+      IPAM_DATABASE_NAME: phpipam
+      IPAM_DATABASE_USER: phpipam
+      IPAM_DATABASE_PASS_FILE: /run/lab-secrets/mariadb_password
+      LAB_ADMIN_PASSWORD_FILE: /run/lab-secrets/admin_password
+      LAB_API_READ_TOKEN_FILE: /run/lab-secrets/api_read_token
+      LAB_API_SEED_TOKEN_FILE: /run/lab-secrets/api_seed_token
+    volumes:
+      - ./tests/lab/bootstrap.sh:/lab/bootstrap.sh:ro
+      - ./tests/lab/seed.php:/lab/seed.php:ro
+      - phpipam_lab_secrets:/run/lab-secrets:ro
+    networks: [phpipam_lab]
+
+  phpipam-web:
+    image: phpipam/phpipam-www:${PHPIPAM_LAB_VERSION:-v1.8.1}
+    restart: "no"
+    depends_on:
+      phpipam-bootstrap: { condition: service_completed_successfully }
+    environment:
+      IPAM_DATABASE_HOST: phpipam-db
+      IPAM_DATABASE_NAME: phpipam
+      IPAM_DATABASE_USER: phpipam
+      IPAM_DATABASE_PASS_FILE: /run/lab-secrets/mariadb_password
+      IPAM_DISABLE_INSTALLER: "true"
+      IPAM_TRUST_X_FORWARDED: "true"
+    volumes:
+      - phpipam_lab_secrets:/run/lab-secrets:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --spider http://localhost/ || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    networks: [phpipam_lab]
+
+  phpipam-proxy:
+    image: caddy:2.10.0-alpine
+    restart: "no"
+    depends_on:
+      phpipam-web: { condition: service_healthy }
+    command: ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
+    read_only: true
+    ports:
+      - target: 8443
+        published: "${IPAMFERRY_LAB_PHPIPAM_HTTPS_PORT:-18082}"
+        host_ip: 127.0.0.1
+    volumes:
+      - ./tests/lab/Caddyfile:/etc/caddy/Caddyfile:ro
+      - phpipam_lab_caddy_data:/data
+      - phpipam_lab_caddy_config:/config
+    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=16m"]
+    networks: [phpipam_lab]
+
+  phpipam-ca-export:
+    image: alpine:3.21
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        until test -f /source/caddy/pki/authorities/local/root.crt; do sleep 1; done
+        cp /source/caddy/pki/authorities/local/root.crt /target/root.crt
+        chmod 0444 /target/root.crt
+    restart: "no"
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    depends_on:
+      phpipam-proxy: { condition: service_started }
+    volumes:
+      - phpipam_lab_caddy_data:/source:ro
+      - phpipam_lab_ca:/target
+    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=16m"]
+    networks: [phpipam_lab]
+
+  app:
+    environment:
+      CURL_CA_BUNDLE: /run/ipamferry-lab-ca/root.crt
+      SSL_CERT_FILE: /run/ipamferry-lab-ca/root.crt
+      IPAMFERRY_EXTRA_CA_BUNDLE: /run/ipamferry-lab-ca/root.crt
+      IPAMFERRY_SANDBOX_TOKEN_FORMAT: ${IPAMFERRY_LAB_NETBOX_TOKEN_FORMAT:-v2}
+    depends_on:
+      database-init: { condition: service_completed_successfully }
+      phpipam-ca-export: { condition: service_completed_successfully }
+    volumes:
+      - phpipam_lab_ca:/run/ipamferry-lab-ca:ro
+      - phpipam_lab_secrets:/run/lab-secrets:ro
+    networks: [phpipam_lab]
+
+  sandbox-netbox:
+    image: ${IPAMFERRY_LAB_NETBOX_IMAGE:-netboxcommunity/netbox:v4.6.1-5.0.1}
+    # NetBox 4.4 images predate the dedicated `netbox` user shipped by later
+    # images.  Keep the production default, while letting the disposable
+    # compatibility lab select the image-compatible runtime user explicitly.
+    user: ${IPAMFERRY_LAB_NETBOX_USER:-netbox:root}
+    # NetBox 4.4's Unit launcher starts as root and drops to its bundled
+    # `unit` account itself. These are the two capabilities it needs for that
+    # image-specific transition; this exception applies only to the ephemeral
+    # compatibility lab, never the regular sandbox service.
+    cap_add: [SETUID, SETGID]
+    environment:
+      IPAMFERRY_SANDBOX_TOKEN_FORMAT: ${IPAMFERRY_LAB_NETBOX_TOKEN_FORMAT:-v2}
+
+  sandbox-postgres:
+    image: ${IPAMFERRY_LAB_NETBOX_POSTGRES_IMAGE:-postgres:14-bookworm}
+
+networks:
+  phpipam_lab:
+    internal: true
+
+volumes:
+  phpipam_lab_secrets:
+  phpipam_lab_mariadb:
+  phpipam_lab_caddy_data:
+  phpipam_lab_caddy_config:
+  phpipam_lab_ca:
