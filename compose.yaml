@@ -1,7 +1,7 @@
 name: ipamferry
 
 x-ipamferry-image: &ipamferry-image
-  image: ${IPAMFERRY_IMAGE:-docker.io/lrqnet/ipamferry:0.3.0}
+  image: ${IPAMFERRY_IMAGE:-docker.io/lrqnet/ipamferry:0.3.1}
 
 x-ipamferry-environment: &ipamferry-environment
   APP_ENV: production
@@ -164,7 +164,7 @@ services:
     security_opt: ["no-new-privileges:true"]
     depends_on: { app: { condition: service_healthy } }
     environment:
-      IPAMFERRY_IMAGE: ${IPAMFERRY_IMAGE:-docker.io/lrqnet/ipamferry:0.3.0}
+      IPAMFERRY_IMAGE: ${IPAMFERRY_IMAGE:-docker.io/lrqnet/ipamferry:0.3.1}
       IPAMFERRY_HTTP_PORT: ${IPAMFERRY_HTTP_PORT:-80}
       IPAMFERRY_HTTPS_PORT: ${IPAMFERRY_HTTPS_PORT:-443}
       IPAMFERRY_BIND_IP: ${IPAMFERRY_BIND_IP:-0.0.0.0}

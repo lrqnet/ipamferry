@@ -4,6 +4,12 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.3.1] - 2026-08-01
+
+### Fixed
+
+- Release checksum now verifies the downloaded `compose.yaml` artifact directly.
+
 ## [0.3.0] - 2026-08-01
 
 ### Added

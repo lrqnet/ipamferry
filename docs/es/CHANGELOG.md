@@ -4,6 +4,12 @@
 
 Todos los cambios relevantes de este proyecto se documentan en este archivo.
 
+## [0.3.1] - 2026-08-01
+
+### Corregido
+
+- El checksum de la versión ahora verifica directamente el artefacto `compose.yaml` descargado.
+
 ## [0.3.0] - 2026-08-01
 
 ### Añadido
