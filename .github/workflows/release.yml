@@ -93,7 +93,7 @@ jobs:
           grep -q "docker.io/lrqnet/ipamferry@sha256:" dist/compose.yaml
           ! grep -q "x-ipamferry-image:.*IPAMFERRY_IMAGE" dist/compose.yaml
           docker compose -f dist/compose.yaml config --quiet
-          sha256sum dist/compose.yaml > dist/compose.sha256
+          (cd dist && sha256sum compose.yaml) > dist/compose.sha256
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65
         with:
           generate_release_notes: true
