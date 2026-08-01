@@ -3,6 +3,8 @@
 return [
     'version' => env('IPAMFERRY_VERSION', 'dev'),
     'source_url' => env('IPAMFERRY_SOURCE_URL', 'https://github.com/lrqnet/ipamferry'),
+    'updates_enabled' => (bool) env('IPAMFERRY_UPDATES_ENABLED', false),
+    'release_api_url' => env('IPAMFERRY_RELEASE_API_URL', 'https://api.github.com/repos/lrqnet/ipamferry/releases/latest'),
     'dump_max_bytes' => (int) env('IPAMFERRY_DUMP_MAX_BYTES', 1_073_741_824),
     'dump_retention_hours' => (int) env('IPAMFERRY_DUMP_RETENTION_HOURS', 24),
     'dump_max_rows' => (int) env('IPAMFERRY_DUMP_MAX_ROWS', 5_000_000),

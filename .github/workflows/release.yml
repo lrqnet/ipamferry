@@ -88,8 +88,10 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           mkdir -p dist
-          sed "s#docker.io/lrqnet/ipamferry:${VERSION}#docker.io/lrqnet/ipamferry@${DIGEST}#g" compose.yaml > dist/compose.yaml
+          needle='${IPAMFERRY_IMAGE:-docker.io/lrqnet/ipamferry:'"${VERSION}"'}'
+          sed "s#${needle}#docker.io/lrqnet/ipamferry@${DIGEST}#g" compose.yaml > dist/compose.yaml
           grep -q "docker.io/lrqnet/ipamferry@sha256:" dist/compose.yaml
+          ! grep -q "x-ipamferry-image:.*IPAMFERRY_IMAGE" dist/compose.yaml
           docker compose -f dist/compose.yaml config --quiet
           sha256sum dist/compose.yaml > dist/compose.sha256
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65

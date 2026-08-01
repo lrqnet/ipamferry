@@ -12,6 +12,14 @@ docker compose --file compose.yaml --file compose.dev.yaml up -d --build --wait
 
 Confirm service health with `docker compose ps`. `app` is the only service exposed to the LAN. Do not expose PostgreSQL, sandbox NetBox, or internal service networks.
 
+## In-panel updates
+
+The footer shows the installed version on every page. Once every 24 hours, IpamFerry checks the public GitHub API for the newest stable release; no installation identifier, migration data, credentials, or telemetry is sent. An owner can also select **Check for updates**.
+
+Only an owner can confirm an update. The updater downloads the release `compose.yaml`, validates its published SHA-256 checksum, and accepts only an IpamFerry image pinned by digest. It refuses pre-releases, downgrades, concurrent updates, and updates while discovery, planning, apply, or verification is running. The application restarts briefly after the update.
+
+The `updater` service has Docker socket access so it can recreate the IpamFerry application services; this is equivalent to Docker-host administrator authority. It has no network access and is not exposed to the LAN. Do not enable `IPAMFERRY_UPDATES_ENABLED` on a host where owners must not have this operational capability. If the replacement app does not become healthy, automatic rollback is intentionally not attempted because database migrations may be irreversible; inspect `docker compose logs updater` and follow the release notes.
+
 ## Password recovery
 
 Recovery requires Docker host administrator access and an interactive terminal:

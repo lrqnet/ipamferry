@@ -1,6 +1,7 @@
 import { usePage } from "@inertiajs/react";
 import type { ReactNode } from "react";
 import { Brand } from "./Brand";
+import { AppFooter } from "./AppFooter";
 import { LanguageSelector } from "./LanguageSelector";
 
 export function PageShell({ children }: { children: ReactNode }) {
@@ -9,8 +10,8 @@ export function PageShell({ children }: { children: ReactNode }) {
   }>().props;
 
   return (
-    <>
-      <header className="mx-auto flex max-w-5xl items-center justify-between px-6 pt-5">
+    <div className="flex min-h-screen flex-col">
+      <header className="mx-auto flex w-full max-w-5xl items-center justify-between px-6 pt-5">
         <Brand />
         <LanguageSelector />
       </header>
@@ -31,6 +32,7 @@ export function PageShell({ children }: { children: ReactNode }) {
         </div>
       )}
       {children}
-    </>
+      <AppFooter />
+    </div>
   );
 }

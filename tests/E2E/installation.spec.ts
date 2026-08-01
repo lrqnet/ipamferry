@@ -19,6 +19,8 @@ test("claims an installation and migrates baseline and expanded inventories", as
     throw new Error("IPAMFERRY_INSTALLATION_TOKEN is required for E2E.");
 
   await page.goto("/setup");
+  await expect(page.getByText("Created by")).toBeVisible();
+  await expect(page.getByText("Version dev")).toBeVisible();
   await page.getByRole("button", { name: "Change language" }).click();
   await page.getByRole("menuitem", { name: "Português (Brasil)" }).click();
   await expect(
@@ -44,6 +46,9 @@ test("claims an installation and migrates baseline and expanded inventories", as
   await page.getByRole("button", { name: "Create owner" }).click();
   await expect(
     page.getByRole("heading", { name: "Migration projects" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Check for updates" }),
   ).toBeVisible();
 
   await page.getByRole("link", { name: "New project" }).click();

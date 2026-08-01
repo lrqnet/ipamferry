@@ -21,5 +21,6 @@ class AppServiceProvider extends ServiceProvider
         // per-user limit, but leave enough headroom for that legitimate flow.
         RateLimiter::for('migration-write', fn ($request) => Limit::perMinute(60)->by((string) $request->user()?->id));
         RateLimiter::for('migration-apply', fn ($request) => Limit::perMinute(120)->by((string) $request->user()?->id));
+        RateLimiter::for('installation-update', fn ($request) => Limit::perMinute(10)->by((string) $request->user()?->id));
     }
 }

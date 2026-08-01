@@ -1,7 +1,7 @@
 name: ipamferry
 
 x-ipamferry-image: &ipamferry-image
-  image: ${IPAMFERRY_IMAGE:-docker.io/lrqnet/ipamferry:0.2.0}
+  image: ${IPAMFERRY_IMAGE:-docker.io/lrqnet/ipamferry:0.3.0}
 
 x-ipamferry-environment: &ipamferry-environment
   APP_ENV: production
@@ -13,6 +13,8 @@ x-ipamferry-environment: &ipamferry-environment
   DB_PORT: "5432"
   DB_DATABASE: ipamferry
   DB_USERNAME: ipamferry
+  IPAMFERRY_UPDATES_ENABLED: ${IPAMFERRY_UPDATES_ENABLED:-true}
+  IPAMFERRY_RELEASE_API_URL: ${IPAMFERRY_RELEASE_API_URL:-https://api.github.com/repos/lrqnet/ipamferry/releases/latest}
 
 services:
   init:
@@ -27,6 +29,7 @@ services:
       - ipamferry_secrets:/run/ipamferry-secrets
       - ipamferry_recovery_secrets:/run/ipamferry-recovery-secrets
       - ipamferry_storage:/var/lib/ipamferry/storage
+      - ipamferry_updates:/var/lib/ipamferry/updates
       - ipamferry_cache:/var/lib/ipamferry/cache
       - caddy_data:/var/lib/ipamferry/caddy-data
       - caddy_config:/var/lib/ipamferry/caddy-config
@@ -89,6 +92,7 @@ services:
       [
         "ipamferry_secrets:/run/ipamferry-secrets:ro",
         "ipamferry_storage:/app/storage",
+        "ipamferry_updates:/app/storage/app/private/updates",
         "ipamferry_cache:/app/bootstrap/cache",
         "caddy_data:/data",
         "caddy_config:/config",
@@ -151,6 +155,51 @@ services:
     tmpfs:
       ["/tmp:rw,noexec,nosuid,nodev,size=64m,uid=20000,gid=20000,mode=1700"]
     networks: [internal]
+  updater:
+    image: docker:27.5-cli@sha256:851f91d241214e7c6db86513b270d58776379aacc5eb9c4a87e5b47115e3065c
+    restart: unless-stopped
+    user: "0:0"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    depends_on: { app: { condition: service_healthy } }
+    environment:
+      IPAMFERRY_IMAGE: ${IPAMFERRY_IMAGE:-docker.io/lrqnet/ipamferry:0.3.0}
+      IPAMFERRY_HTTP_PORT: ${IPAMFERRY_HTTP_PORT:-80}
+      IPAMFERRY_HTTPS_PORT: ${IPAMFERRY_HTTPS_PORT:-443}
+      IPAMFERRY_BIND_IP: ${IPAMFERRY_BIND_IP:-0.0.0.0}
+      IPAMFERRY_SANDBOX_TOKEN_FORMAT: ${IPAMFERRY_SANDBOX_TOKEN_FORMAT:-v2}
+    volumes:
+      - ipamferry_updates:/var/lib/ipamferry/updates
+      - /var/run/docker.sock:/var/run/docker.sock
+    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=32m"]
+    network_mode: none
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        set -eu
+        updates=/var/lib/ipamferry/updates
+        result() { printf '{"status":"%s","version":"%s"}\n' "$$1" "$$2" > "$$updates/result.json"; }
+        fail() { result failed "$$1"; rm -f "$$updates/request.json"; }
+        while true; do
+          request="$$updates/request.json"; compose="$$updates/compose.yaml"
+          if [ -f "$$request" ] && [ -f "$$compose" ]; then
+            version=$$(sed -n 's/.*"version":"\([0-9.]*\)".*/\1/p' "$$request" | head -n 1)
+            expected=$$(sed -n 's/.*"sha256":"\([a-f0-9]*\)".*/\1/p' "$$request" | head -n 1)
+            actual=$$(sha256sum "$$compose" | awk '{print $$1}')
+            if [ -z "$$version" ] || [ "$$expected" != "$$actual" ]; then fail unknown; sleep 5; continue; fi
+            mv "$$request" "$$updates/processing.json"
+            if ! docker compose -p ipamferry -f "$$compose" pull init database-init app worker scheduler; then fail "$$version"; sleep 5; continue; fi
+            if ! docker compose -p ipamferry -f "$$compose" run --rm init; then fail "$$version"; sleep 5; continue; fi
+            if ! docker compose -p ipamferry -f "$$compose" run --rm database-init; then fail "$$version"; sleep 5; continue; fi
+            if ! docker compose -p ipamferry -f "$$compose" up -d --no-deps --force-recreate app worker scheduler; then fail "$$version"; sleep 5; continue; fi
+            app_id=$$(docker compose -p ipamferry -f "$$compose" ps -q app); healthy=false
+            for _ in $$(seq 1 36); do [ "$$(docker inspect -f '{{.State.Health.Status}}' "$$app_id" 2>/dev/null || true)" = healthy ] && healthy=true && break; sleep 5; done
+            if [ "$$healthy" = true ]; then result completed "$$version"; rm -f "$$updates/processing.json"; else fail "$$version"; fi
+          fi
+          sleep 5
+        done
   sandbox-netbox:
     profiles: ["sandbox"]
     image: netboxcommunity/netbox:v4.6.1-5.0.1
@@ -265,6 +314,7 @@ volumes:
     ipamferry_secrets: {},
     ipamferry_recovery_secrets: {},
     ipamferry_storage: {},
+    ipamferry_updates: {},
     ipamferry_cache: {},
     caddy_data: {},
     caddy_config: {},

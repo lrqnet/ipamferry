@@ -4,6 +4,19 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.3.0] - 2026-08-01
+
+### Added
+
+- Global responsive footer with project repository, author, GitHub Sponsors link, installed version, and owner-only update controls.
+- Daily, privacy-preserving stable-release checks and a secure in-panel update workflow using verified checksums and digest-pinned Compose artifacts.
+- Dedicated least-privilege updater service, persistent update status, concurrent-update protection, migration-operation blocking, and health-check failure reporting.
+
+### Fixed
+
+- Header branding and language selector now use the full available width instead of collapsing together on narrow layouts.
+- The updater uses a dedicated private exchange volume so it works correctly with non-root Laravel containers on Docker Desktop and Linux hosts.
+
 ## [0.2.0] - 2026-07-28
 
 ### Added
