@@ -4,6 +4,19 @@
 
 Todas as mudanças relevantes deste projeto são documentadas neste arquivo.
 
+## [0.3.0] - 2026-08-01
+
+### Adicionado
+
+- Rodapé global responsivo com repositório do projeto, autor, link para GitHub Sponsors, versão instalada e controles de atualização exclusivos do owner.
+- Verificação diária e privativa de releases estáveis, além de fluxo seguro de atualização no painel com checksum verificado e Compose fixado por digest.
+- Serviço updater dedicado com privilégio mínimo, estado persistente, proteção contra atualizações concorrentes, bloqueio durante migrações e relatório de falha de health check.
+
+### Corrigido
+
+- Marca do cabeçalho e seletor de idioma passam a usar toda a largura disponível, sem ficarem juntos em telas estreitas.
+- O updater usa um volume privado dedicado para funcionar corretamente entre containers Laravel não-root no Docker Desktop e hosts Linux.
+
 ## [0.2.0] - 2026-07-28
 
 ### Adicionado

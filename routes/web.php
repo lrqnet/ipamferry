@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\InstallationUpdateController;
 use App\Http\Controllers\LocaleController;
 use App\Http\Controllers\MappingStudioController;
 use App\Http\Controllers\MigrationProjectController;
@@ -14,6 +15,9 @@ Route::post('/setup', [SetupController::class, 'store'])->middleware('throttle:5
 Route::put('/locale', LocaleController::class)->name('locale.update');
 
 Route::middleware('auth')->group(function (): void {
+    Route::get('/installation-update', [InstallationUpdateController::class, 'status'])->name('installation-update.status');
+    Route::post('/installation-update/check', [InstallationUpdateController::class, 'check'])->middleware(['role:owner', 'throttle:installation-update'])->name('installation-update.check');
+    Route::post('/installation-update', [InstallationUpdateController::class, 'request'])->middleware(['role:owner', 'throttle:installation-update'])->name('installation-update.request');
     Route::get('/dashboard', DashboardController::class)->name('dashboard');
     Route::get('/projects', [MigrationProjectController::class, 'index'])->name('projects.index');
     Route::get('/projects/{project}', [MigrationProjectController::class, 'show'])->name('projects.show');

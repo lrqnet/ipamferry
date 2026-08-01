@@ -4,6 +4,19 @@
 
 Todos los cambios relevantes de este proyecto se documentan en este archivo.
 
+## [0.3.0] - 2026-08-01
+
+### Añadido
+
+- Pie de página global responsivo con repositorio del proyecto, autor, enlace a GitHub Sponsors, versión instalada y controles de actualización exclusivos del owner.
+- Comprobación diaria y privada de versiones estables, además de un flujo seguro de actualización desde el panel con checksum verificado y Compose fijado por digest.
+- Servicio updater dedicado con privilegio mínimo, estado persistente, protección frente a actualizaciones simultáneas, bloqueo durante migraciones e informe de fallos de health check.
+
+### Corregido
+
+- La marca del encabezado y el selector de idioma usan todo el ancho disponible y no quedan juntos en pantallas estrechas.
+- El updater usa un volumen privado dedicado para funcionar correctamente entre contenedores Laravel no-root en Docker Desktop y hosts Linux.
+
 ## [0.2.0] - 2026-07-28
 
 ### Añadido

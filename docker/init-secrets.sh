@@ -9,6 +9,7 @@ mkdir -p \
   /var/lib/ipamferry/storage/framework/uploads \
   /var/lib/ipamferry/storage/framework/views \
   /var/lib/ipamferry/storage/logs \
+  /var/lib/ipamferry/updates \
   /var/lib/ipamferry/cache \
   /var/lib/ipamferry/caddy-data \
   /var/lib/ipamferry/caddy-config \
@@ -19,6 +20,10 @@ chown -R 20000:20000 \
   /var/lib/ipamferry/caddy-data \
   /var/lib/ipamferry/caddy-config
 chown -R 999:999 /var/lib/ipamferry/sandbox-postgres
+# The updater must be root to use the Docker socket while Laravel runs as an
+# unprivileged user. This dedicated, private named volume is mounted only by
+# those two services; both need to exchange signed update request/result files.
+chmod 0777 /var/lib/ipamferry/updates
 write_secret() {
   target="/run/ipamferry-secrets/$1"
   bytes="$2"
